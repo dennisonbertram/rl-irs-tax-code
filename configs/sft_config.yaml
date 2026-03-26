@@ -1,0 +1,36 @@
+# SFT Training Configuration — mlx_lm.lora
+# Used by scripts/train_sft.py and scripts/run_sft.sh
+#
+# Hardware target: Apple M4 Max, 128 GB unified RAM, 40-core GPU
+# Strategy: bf16 LoRA (no quantization), rank 32
+
+model: models/qwen25-3b-mlx         # MLX-converted preferred
+model_hf: models/qwen2.5-3b-instruct # HF fallback (auto-converted by mlx_lm)
+
+data: data/processed/train          # expects train.jsonl + valid.jsonl
+
+# LoRA configuration
+lora_layers: 16                     # number of transformer layers receiving LoRA
+lora_rank: 32                       # LoRA rank r (higher = more capacity, more memory)
+lora_alpha: 32                      # LoRA alpha (scaling factor = alpha/rank)
+lora_dropout: 0.05
+
+# Training schedule
+iters: 1000                         # total gradient steps
+batch_size: 4                       # sequences per step (M4 Max can handle 4 @ 2048)
+max_seq_length: 2048                # context window
+learning_rate: 1.0e-5
+lr_schedule: cosine_decay           # cosine decay from lr to 0
+warmup_steps: 50
+
+# Evaluation & checkpointing
+val_batches: 25                     # steps worth of validation data
+steps_per_eval: 100                 # run validation every N steps
+save_every: 200                     # checkpoint every N steps
+adapter_path: outputs/sft/adapters
+
+# Memory optimisation
+grad_checkpoint: true               # gradient checkpointing (trades speed for memory)
+
+# Logging
+log_every: 10                       # print loss every N steps

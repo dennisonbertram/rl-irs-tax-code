@@ -1,0 +1,38 @@
+# DPO Training Configuration
+# Used by scripts/train_dpo.py
+#
+# Initialises from SFT adapter; runs DPO on preference pairs.
+# Hardware target: Apple M4 Max, 128 GB unified RAM
+
+model: models/qwen25-3b-mlx
+model_hf: models/qwen2.5-3b-instruct
+
+data: data/processed/train/dpo.jsonl  # {prompt, chosen, rejected} records
+
+# Starting point
+sft_adapter: outputs/sft/adapters
+
+# LoRA configuration
+lora_layers: 16
+lora_rank: 16                        # smaller rank for DPO fine-tuning stage
+lora_alpha: 16
+
+# DPO hyperparameters
+beta: 0.1                            # KL penalty coefficient
+# beta=0.1 is standard; increase if model drifts too far from reference,
+# decrease if training is too conservative.
+
+# Training schedule
+iters: 500
+batch_size: 2                        # DPO needs 2× memory per step (chosen + rejected)
+max_seq_length: 1024
+learning_rate: 5.0e-6               # lower LR than SFT to preserve alignment
+lr_schedule: cosine_decay
+warmup_steps: 25
+
+# Checkpointing
+save_every: 100
+adapter_path: outputs/dpo/adapters
+
+# Logging
+log_every: 10

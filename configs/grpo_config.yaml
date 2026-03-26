@@ -1,0 +1,40 @@
+# GRPO Training Configuration
+# Used by scripts/train_grpo.py
+#
+# Group Relative Policy Optimisation for tax-law RL.
+# Hardware target: Apple M4 Max, 128 GB unified RAM
+
+model: models/qwen25-3b-mlx
+model_hf: models/qwen2.5-3b-instruct
+
+data: data/processed/train/grpo.jsonl  # {prompt} records
+
+# Starting point (picks best available: grpo > dpo > sft > none)
+sft_adapter: outputs/sft/adapters
+dpo_adapter: outputs/dpo/adapters
+
+# LoRA configuration
+lora_layers: 16
+lora_rank: 32
+lora_alpha: 32
+
+# GRPO hyperparameters
+group_size: 4                        # K completions per prompt
+batch_size: 1                        # prompts per gradient step
+temperature: 0.8                     # sampling temperature for completion generation
+max_new_tokens: 512                  # max completion length
+epsilon_clip: 0.2                    # PPO clip range (ρ clipped to [1-ε, 1+ε])
+kl_coeff: 0.01                       # weight on KL divergence penalty term
+
+# Training schedule
+iters: 300
+learning_rate: 1.0e-6               # conservative LR for RL stability
+lr_schedule: constant               # constant LR typical for GRPO
+
+# Checkpointing
+save_every: 50
+adapter_path: outputs/grpo/adapters
+
+# Logging
+log_every: 5                        # more frequent logs since each step is slower
+seed: 42

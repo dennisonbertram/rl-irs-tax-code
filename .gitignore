@@ -1,7 +1,27 @@
+# Models (too large for git)
 models/
+
+# Training outputs — safetensors are large binary checkpoints
+# Keep adapter configs and logs, exclude all binary weights
+outputs/**/*.safetensors
+outputs/final/
+
+# Data (large generated files — regenerate via scripts/download_data.sh + parse scripts)
 data/raw/
 data/processed/
-outputs/
+
+# Python
+.venv/
 __pycache__/
 *.pyc
+.env
+
+# OS
+.DS_Store
+
+# Coord state (internal)
 .coord/
+
+# Temp
+/tmp/
+*.log
