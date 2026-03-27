@@ -132,15 +132,19 @@ def check_data() -> None:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_prompts(path: Path) -> list[str]:
-    prompts = []
+def load_prompts(path: Path) -> list[dict]:
+    """Load GRPO data as list of dicts with 'prompt' and optional 'expected_section'."""
+    records = []
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line:
                 rec = json.loads(line)
-                prompts.append(rec["prompt"])
-    return prompts
+                records.append({
+                    "prompt": rec["prompt"],
+                    "expected_section": rec.get("expected_section", None),
+                })
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -298,8 +302,8 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     ref_model.eval()
     ref_model.freeze()
 
-    prompts = load_prompts(GRPO_DATA)
-    print(f"Loaded {len(prompts)} GRPO prompts.")
+    prompt_records = load_prompts(GRPO_DATA)
+    print(f"Loaded {len(prompt_records)} GRPO prompts.")
 
     optimizer = optim.Adam(learning_rate=args.learning_rate)
 
@@ -317,8 +321,10 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
         )
 
         for step in range(1, args.iters + 1):
-            # Sample a prompt
-            prompt = prompts[rng.integers(len(prompts))]
+            # Sample a prompt record
+            rec = prompt_records[rng.integers(len(prompt_records))]
+            prompt = rec["prompt"]
+            expected_section = rec.get("expected_section", None)
 
             # Generate K completions (no grad)
             policy_model.eval()
@@ -330,8 +336,8 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
             )
             policy_model.train()
 
-            # Score completions
-            rewards = [compute_reward(prompt, c) for c in completions]
+            # Score completions with citation accuracy
+            rewards = [compute_reward(prompt, c, expected_section=expected_section) for c in completions]
 
             # Compute loss
             def loss_fn(model):

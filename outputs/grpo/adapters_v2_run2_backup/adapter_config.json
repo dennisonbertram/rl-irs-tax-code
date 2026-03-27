@@ -1,22 +1,22 @@
 {
-    "adapter_path": "/Users/dennisonbertram/Develop/rl-irs-tax-code/outputs/sft/adapters",
+    "adapter_path": "outputs/grpo/adapters",
     "batch_size": 4,
-    "config": "/Users/dennisonbertram/Develop/rl-irs-tax-code/configs/mlx_lora_rank32.yaml",
-    "data": "/Users/dennisonbertram/Develop/rl-irs-tax-code/data/processed/train",
+    "config": null,
+    "data": "data/processed/train",
     "fine_tune_type": "lora",
     "grad_accumulation_steps": 1,
-    "grad_checkpoint": true,
-    "iters": 1000,
-    "learning_rate": 1e-05,
+    "grad_checkpoint": false,
+    "iters": 300,
+    "learning_rate": 1e-06,
     "lora_parameters": {
         "rank": 32,
-        "dropout": 0.05,
-        "scale": 20.0
+        "dropout": 0.0,
+        "scale": 1.0
     },
     "lr_schedule": null,
     "mask_prompt": false,
     "max_seq_length": 2048,
-    "model": "/Users/dennisonbertram/Develop/rl-irs-tax-code/models/qwen25-3b-mlx",
+    "model": "models/qwen25-3b-mlx",
     "num_layers": 16,
     "optimizer": "adam",
     "optimizer_config": {
@@ -29,12 +29,15 @@
     "project_name": null,
     "report_to": null,
     "resume_adapter_file": null,
-    "save_every": 200,
+    "save_every": 100,
     "seed": 0,
     "steps_per_eval": 100,
-    "steps_per_report": 10,
+    "steps_per_report": 5,
     "test": false,
     "test_batches": 500,
     "train": true,
-    "val_batches": 25
+    "val_batches": 25,
+    "training": "grpo",
+    "group_size": 4,
+    "eps_clip": 0.2
 }

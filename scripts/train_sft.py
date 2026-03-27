@@ -104,13 +104,16 @@ def check_data() -> None:
 
 def build_command(args: argparse.Namespace, model_path: Path) -> list[str]:
     """Construct the mlx_lm.lora command."""
+    # Note: --lora-layers was renamed to --num-layers in mlx_lm >= 0.19
+    # LoRA rank is set via a YAML config file (-c flag)
+    lora_config = PROJECT_ROOT / "configs" / "mlx_lora_rank32.yaml"
     cmd = [
         sys.executable, "-m", "mlx_lm.lora",
         "--model", str(model_path),
         "--data", str(DATA_DIR),
         "--train",
         "--batch-size", str(args.batch_size),
-        "--lora-layers", str(args.lora_layers),
+        "--num-layers", str(args.lora_layers),
         "--iters", str(args.iters),
         "--val-batches", str(args.val_batches),
         "--learning-rate", str(args.learning_rate),
@@ -119,6 +122,8 @@ def build_command(args: argparse.Namespace, model_path: Path) -> list[str]:
         "--save-every", str(args.save_every),
         "--max-seq-length", str(args.max_seq_length),
     ]
+    if lora_config.exists():
+        cmd += ["-c", str(lora_config)]
     if args.grad_checkpoint:
         cmd.append("--grad-checkpoint")
     return cmd

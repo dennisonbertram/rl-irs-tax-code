@@ -1,0 +1,55 @@
+SFT Generation Test Outputs
+===========================
+Model: models/qwen25-3b-mlx
+Adapter: outputs/sft/adapters (1000 iterations)
+Date: 2026-03-25
+
+Training Summary
+----------------
+Val loss at iter 1:    1.995
+Val loss at iter 100:  1.064
+Val loss at iter 200:  1.037
+Val loss at iter 300:  1.000
+Val loss at iter 500:  1.045
+Val loss at iter 600:  0.980
+Val loss at iter 700:  1.004
+Val loss at iter 900:  0.985
+Val loss at iter 1000: 0.984
+
+Train loss at iter 10:   1.504
+Train loss at iter 100:  1.116
+Train loss at iter 500:  1.069
+Train loss at iter 1000: 0.993
+
+Peak memory: 28.943 GB
+Trainable parameters: 0.216% (6.652M/3085.939M)
+Total trained tokens: ~1,868,090
+
+---
+
+TEST 1: Standard Deduction
+Prompt: "What is the standard deduction for a single filer under IRC Section 63?"
+------------------------------------------------------------------
+Under Internal Revenue Code (IRC) Section 63, the standard deduction for a single filer is $12,950.
+
+[Prompt: 46 tokens, 187.236 tokens-per-sec | Generation: 30 tokens, 54.935 tokens-per-sec | Peak memory: 6.370 GB]
+
+---
+
+TEST 2: Business Expense Deductions
+Prompt: "Explain IRC Section 162 regarding business expense deductions."
+------------------------------------------------------------------
+IRC Section 162 (Business expense deductions) provides the following rules and requirements: Business expense deductions (a) General rule Except as otherwise provided in this chapter, the deductions allowed under this chapter for the taxable year shall be the deductions allowed under section 162 of the Internal Revenue Code for the taxable year. (b) Limitation on deductions for certain business interest expenses (1) In general For purposes of this section, the term "business interest expense" means the sum of— (A) the business interest expense allowable under section 163(a), and (B) the business interest expense allowable under section 163(j). (2) Business interest expense allowable under section 163(a) For purposes of this section, the term "business interest expense" includes the business interest expense allowable under section 163(a). (3) Business interest expense allowable under section 163(j) For purposes of this section, the term "business interest expense" includes the business interest expense allowable under section 163(j). (4) Business interest expense For purposes of this section, the term "business interest expense" means the sum of— (A) the business interest expense allowable under section 163(a)
+
+[Prompt: 42 tokens, 371.700 tokens-per-sec | Generation: 256 tokens, 53.097 tokens-per-sec | Peak memory: 6.374 GB]
+
+---
+
+TEST 3: 401(k) Contributions
+Prompt: "What are the rules for 401(k) contributions under Section 401?"
+------------------------------------------------------------------
+Under Section 401 of the Internal Revenue Code (Code), the following rules apply for 401(k) contributions:
+
+1. 401(k) plan—(a) In general. For purposes of this subtitle, the term "401(k) plan" means any plan described in section 401(a) which is a defined contribution plan. (b) Special rules for certain defined contribution plans. For purposes of this subtitle, the term "401(k) plan" does not include any plan which is a defined contribution plan which is not a qualified plan.
+
+[Prompt: 48 tokens, 434.262 tokens-per-sec | Generation: 124 tokens, 53.457 tokens-per-sec | Peak memory: 6.397 GB]

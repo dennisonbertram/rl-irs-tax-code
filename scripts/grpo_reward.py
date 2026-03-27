@@ -88,62 +88,93 @@ def count_legal_terms(response: str) -> int:
     return sum(1 for term in LEGAL_PRECISION_TERMS if term in response_lower)
 
 
+def extract_section_number(section_str: str) -> Optional[str]:
+    """Extract the numeric section from strings like 'IRC §1' or 'IRC §179'."""
+    m = re.search(r'(\d+[A-Za-z]?)', section_str)
+    return m.group(1) if m else None
+
+
+def extract_cited_sections(response: str) -> list[str]:
+    """Extract all section numbers cited in a response."""
+    sections = set()
+    for pattern in [IRC_CITATION_PATTERN, SECTION_PATTERN]:
+        for match in pattern.findall(response):
+            # Normalize: strip subsection references like (a)(1)
+            base = re.match(r'(\d+[A-Za-z]?)', match)
+            if base:
+                sections.add(base.group(1))
+    return list(sections)
+
+
+def citation_accuracy_score(response: str, expected_section: Optional[str]) -> float:
+    """
+    Check if the model cites the correct IRC section.
+    Returns 1.0 if the expected section is among cited sections,
+    0.5 if the model cites some section but not the expected one,
+    0.0 if no sections are cited at all.
+    """
+    if not expected_section:
+        return 0.5  # No expected section to verify against; neutral
+
+    expected_num = extract_section_number(expected_section)
+    if not expected_num:
+        return 0.5  # Can't parse expected section; neutral
+
+    cited = extract_cited_sections(response)
+    if not cited:
+        return 0.0  # No citations at all
+
+    if expected_num in cited:
+        return 1.0  # Correct section cited
+
+    return 0.2  # Cited sections but wrong ones
+
+
 def compute_reward(
     prompt: str,
     response: str,
     reference: Optional[str] = None,
+    expected_section: Optional[str] = None,
 ) -> float:
     """
     Compute a scalar reward for a tax law response.
 
     Returns a float in [0.0, 1.0].
 
-    Scoring breakdown:
-    - Citation score:       0.40 (up to 4 citations for full score)
-    - Length/detail score:  0.25 (200-1500 chars is ideal range)
-    - Precision score:      0.20 (legal term usage)
-    - Penalty for vague:   -0.30 (applied if vague language detected)
-    - Bonus for reference:  0.15 (if response overlaps with reference text)
+    Scoring breakdown (v3 — prioritizes citation accuracy):
+    - Citation format score:    0.30 (up to 4 citations for full score)
+    - Citation accuracy score:  0.40 (correct section cited)
+    - Length/detail score:      0.30 (200-1500 chars is ideal range)
+    - Penalty for vague:       -0.30 (applied if vague language detected)
     """
     if not response or not response.strip():
         return 0.0
 
-    # 1. Citation score (0.0 - 0.40)
+    # 1. Citation format score (0.0 - 0.30)
     n_citations = count_citations(response)
-    citation_score = min(n_citations / 4.0, 1.0) * 0.40
+    citation_format_score = min(n_citations / 4.0, 1.0) * 0.30
 
-    # 2. Length/detail score (0.0 - 0.25)
+    # 2. Citation accuracy score (0.0 - 0.40)  [NEW in v3]
+    accuracy = citation_accuracy_score(response, expected_section)
+    citation_accuracy = accuracy * 0.40
+
+    # 3. Length/detail score (0.0 - 0.30)
     response_len = len(response)
     if response_len < 50:
         length_score = 0.0
     elif response_len < 200:
-        length_score = (response_len - 50) / 150 * 0.15
+        length_score = (response_len - 50) / 150 * 0.20
     elif response_len <= 1500:
-        length_score = 0.25
+        length_score = 0.30
     elif response_len <= 3000:
-        # Slightly penalize very long responses
-        length_score = 0.25 - (response_len - 1500) / 1500 * 0.05
+        length_score = 0.30 - (response_len - 1500) / 1500 * 0.05
     else:
-        length_score = 0.20
-
-    # 3. Precision legal language score (0.0 - 0.20)
-    n_terms = count_legal_terms(response)
-    precision_score = min(n_terms / 5.0, 1.0) * 0.20
+        length_score = 0.25
 
     # 4. Vague language penalty (-0.30)
     vague_penalty = -0.30 if has_vague_language(response) else 0.0
 
-    # 5. Reference overlap bonus (0.0 - 0.15)
-    reference_bonus = 0.0
-    if reference:
-        # Compute simple word overlap
-        response_words = set(response.lower().split())
-        reference_words = set(reference.lower().split())
-        if reference_words:
-            overlap = len(response_words & reference_words) / len(reference_words)
-            reference_bonus = min(overlap, 1.0) * 0.15
-
-    total = citation_score + length_score + precision_score + vague_penalty + reference_bonus
+    total = citation_format_score + citation_accuracy + length_score + vague_penalty
     # Clamp to [0, 1]
     return max(0.0, min(1.0, total))
 

@@ -1,0 +1,19 @@
+Processed 10/50...
+Error qwen25-tax-3b q12: timed out
+Error qwen25-tax-3b-v3 q12: timed out
+Processed 20/50...
+Error qwen25-tax-3b-v3 q26: timed out
+Processed 30/50...
+Processed 40/50...
+Processed 50/50...
+
+=== FORMAL EVALUATION (50 samples) ===
+qwen25-tax-3b:
+  Citation accuracy: 2/49 = 4.1%
+  Fact match:        49/49 = 100.0%
+qwen25-tax-3b-v2:
+  Citation accuracy: 1/50 = 2.0%
+  Fact match:        48/50 = 96.0%
+qwen25-tax-3b-v3:
+  Citation accuracy: 2/48 = 4.2%
+  Fact match:        46/48 = 95.8%

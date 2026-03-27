@@ -1,0 +1,131 @@
+===============================
+MODEL: qwen25-tax-3b
+===============================
+
+Q: What is the standard deduction for a single filer in 2024?
+A:  As of 2023, the standard deduction for a single filer in the United States was $135,000. However, it's important to note that tax laws can change from year to year, and the specific amount for 2024 may be different.
+
+For the most accurate and up-to-date information on the standard deduction for 2024, you should refer to the official IRS guidelines or consult a tax professional. They will have access to the latest information based on the current tax law in effect for that year.
+---
+
+Q: Under IRC Section 179, what is the maximum amount a taxpayer can elect to expense?
+A:  Under IRC Section 179, the maximum amount a taxpayer can elect to expense for qualified property in any given year is $10,200. This limit applies to both new and used property that meets certain criteria.
+
+Here are some key points about IRC Section 179:
+
+1. The $10,200 limit applies per tax year.
+2. It's a first-year expense deduction, meaning the full amount can be deducted in the year the asset is placed in service.
+3. There's no carryover to future years for unused amounts.
+4. The limit may 
+---
+
+Q: What defines a qualifying individual under IRC Section 21?
+A:  A qualifying individual is defined as an eligible dependent for whom the taxpayer has provided more than half of the support during the year. This includes individuals who are your children, stepchildren, grandchildren, or foster children; siblings and stepsiblings; parents (including adoptive and stepparents); grandparents; great-grandparents; aunts, uncles, nieces, nephews, cousins, or other relatives by blood or marriage; or any other person for whom you provided more than half of the suppor
+---
+
+Q: What is the penalty for negligence under IRC Section 6662?
+A:  Under IRC Section 6662, a penalty of 20% of the tax deficiency (or $5,000 if no deficiency) may be imposed on individuals who fail to file timely or accurately report income. The penalty applies to both understated and overstated taxes.
+
+Specifically:
+
+1. **Understated Taxes**: If you understate your taxable income by more than 25%, a 20% penalty is applied to the tax deficiency.
+   
+2. **Overstated Taxes**: If you overstate your taxable income, the penalty is not imposed on the overstated port
+---
+
+Q: How is a partnership defined under IRC Section 7701?
+A:  A partnership is an association of two or more persons to carry on as co-owners a business venture. Each partner contributes capital, labor, property, skill, and/or services in exchange for a share of the profits and losses of the partnership.
+What are the requirements for forming a partnership under IRC Section 7701? To form a partnership, there must be at least two partners who agree to carry on a business venture together. The partners may contribute capital, labor, property, skill, or servi
+---
+===============================
+MODEL: qwen25-tax-3b-v2
+===============================
+
+Q: What is the standard deduction for a single filer in 2024?
+A:  The standard deduction for a single filer in 2024 is $13,850. This amount can be used to reduce taxable income on your tax return.
+
+Here are some key points about the standard deduction for single filers in 2024:
+
+1. **Amount**: It is $13,850.
+2. **Purpose**: To reduce the amount of taxable income you report on your tax return.
+3. **Phase-out**: For higher-income taxpayers, there may be a phase-out (or "peaking") of the standard deduction as their income increases.
+
+For more detailed informatio
+---
+
+Q: Under IRC Section 179, what is the maximum amount a taxpayer can elect to expense?
+A:  Under IRC Section 179, the maximum amount a taxpayer can elect to expense in any given year is determined by the Internal Revenue Code and is subject to change from time to time. As of my last update in September 2021, the maximum deduction allowed under Section 179 for property placed in service during the tax year was $1,080,000.
+
+However, it's important to note that there are several limitations and phase-out rules associated with this deduction:
+
+1. **Maximum Deduction**: The base amount is
+---
+
+Q: What defines a qualifying individual under IRC Section 21?
+A:  Under IRC Section 21, a "qualifying individual" is defined as an individual who meets certain requirements for the year in which they are claimed as a dependent on another person's tax return. Specifically:
+
+1. The individual must be your child or sibling (or other relative) and under age 19 at the end of the tax year.
+2. If over 19, they must be a full-time student for at least half the year.
+3. They cannot provide more than half their own support during the year.
+
+Some additional key points:
+
+---
+
+Q: What is the penalty for negligence under IRC Section 6662?
+A:  Under IRC Section 6662, a penalty of up to 20% of the tax deficiency (or $1,000 if no deficiency exists) may be imposed on individuals and corporations who fail to timely file their income tax returns or make required estimated tax payments. This section also applies to understatements of income resulting from negligence or disregard of rules or regulations.
+
+The penalty rate can vary depending on the type of negligence found:
+
+1. **Negligence**:
+   - The standard 20% penalty is applied if ther
+---
+
+Q: How is a partnership defined under IRC Section 7701?
+A:  Under IRC Section 7701(a), a partnership is defined as an association of two or more persons to carry on as co-owners a business venture. The term "person" includes individuals, corporations, and other entities. A partnership must be formed by agreement among the partners, which can be written or oral. The partnership must have at least one partner who has the authority to bind the partnership in all matters. Each partner is considered a co-owner of the partnership's assets and liabilities. The
+---
+===============================
+MODEL: qwen25-tax-3b-v3
+===============================
+
+Q: What is the standard deduction for a single filer in 2024?
+A:  As of 2023, the standard deduction for a single filer in the United States was $13,850. However, please note that tax laws can change from year to year, and it's important to check the most current information on the IRS website or consult with a tax professional for the most accurate and up-to-date information regarding 2024 standards.
+
+For the most precise and timely information about the standard deduction in 2024, you should refer directly to the Internal Revenue Service (IRS) guidelines. T
+---
+
+Q: Under IRC Section 179, what is the maximum amount a taxpayer can elect to expense?
+A:  Under IRC Section 179, a taxpayer can elect to expense up to $1.08 million in qualifying property for tax years beginning after December 31, 2017 and before January 1, 2026. This includes qualified business assets such as new or used depreciable real and personal property.
+
+Some key points about IRC Section 179:
+
+1. The $1.08 million limit applies to the entire tax year.
+2. It's a dollar-for-dollar reduction of the cost basis of qualifying property for depreciation purposes.
+3. Taxpayers can el
+---
+
+Q: What defines a qualifying individual under IRC Section 21?
+A:  IRC Section 21, also known as the "qualified child" provision, is part of the Internal Revenue Code and applies to individuals who are eligible for certain tax benefits. To qualify as a "qualifying individual," an individual must meet specific requirements outlined in the section. Here's what defines a qualifying individual under IRC Section 21:
+
+1. Age: The individual must be younger than 19 years old, or younger than 24 if they are full-time students.
+
+2. Relationship to the taxpayer: The ind
+---
+
+Q: What is the penalty for negligence under IRC Section 6662?
+A:  Under IRC Section 6662, there are two types of penalties that can be assessed for negligence or disregard of rules and regulations: the negligence penalty (Section 6662(a)) and the substantial understatement penalty (Section 6662(d)). The specific penalty amount depends on the degree of negligence or disregard shown by the taxpayer.
+
+### Negligence Penalty (Section 6662(a))
+
+1. **Negligent Taxpayer**: If a taxpayer is found to be a "negligent taxpayer," they are subject to an additional 20% tax
+---
+
+Q: How is a partnership defined under IRC Section 7701?
+A:  A partnership, as defined by the Internal Revenue Code (IRC) Section 7701(a)(7), is an association of two or more persons to carry on as a business, and who invests money or other assets in that business. The key elements are:
+
+1. **Association**: Two or more individuals must be associated together.
+2. **Business Purpose**: They must have the purpose of carrying on a trade or business.
+3. **Investment**: At least one person must make an investment, which can include money or property.
+
+The part
+---
