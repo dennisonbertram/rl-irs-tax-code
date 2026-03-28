@@ -38,6 +38,7 @@ SFT_ADAPTER = PROJECT_ROOT / "outputs" / "sft" / "adapters"
 DPO_ADAPTER = PROJECT_ROOT / "outputs" / "dpo" / "adapters"
 GRPO_ADAPTER = PROJECT_ROOT / "outputs" / "grpo" / "adapters"
 GRPO_DATA = PROJECT_ROOT / "data" / "processed" / "train" / "grpo.jsonl"
+SFT_DATA = PROJECT_ROOT / "data" / "train_v2" / "sft.jsonl"
 LOG_FILE = PROJECT_ROOT / "outputs" / "grpo" / "train.log"
 
 # CLI overrides
@@ -45,6 +46,7 @@ _CLI_MODEL_PATH = None
 _CLI_START_ADAPTER = None
 _CLI_OUTPUT_DIR = None
 _CLI_LOG_FILE = None
+_CLI_SFT_DATA = None
 
 # ---------------------------------------------------------------------------
 # Hyperparameters
@@ -167,18 +169,73 @@ def check_data() -> None:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_prompts(path: Path) -> list[dict]:
-    """Load GRPO data as list of dicts with 'prompt' and optional 'expected_section'."""
+def get_sft_data_path() -> Path | None:
+    """Return the SFT data path (CLI override or default). Returns None if disabled."""
+    if _CLI_SFT_DATA is not None:
+        return None if _CLI_SFT_DATA == "" else Path(_CLI_SFT_DATA)
+    return SFT_DATA
+
+
+def build_reference_lookup(sft_path: Path | None) -> dict[str, str]:
+    """
+    Build a mapping of {user_prompt -> reference_answer} from an SFT JSONL file.
+
+    The SFT format is:
+        {"messages": [{"role": "system", ...}, {"role": "user", ...}, {"role": "assistant", ...}]}
+
+    Returns an empty dict if sft_path is None or the file does not exist.
+    """
+    if sft_path is None:
+        print("SFT reference file disabled. Factual accuracy scoring will use neutral 0.5.")
+        return {}
+    if not sft_path.exists():
+        print(f"WARNING: SFT reference file not found at {sft_path}. "
+              "Factual accuracy scoring will use neutral 0.5 for all examples.")
+        return {}
+
+    lookup: dict[str, str] = {}
+    with open(sft_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            msgs = rec.get("messages", [])
+            user_msg = next((m["content"] for m in msgs if m["role"] == "user"), None)
+            asst_msg = next((m["content"] for m in msgs if m["role"] == "assistant"), None)
+            if user_msg and asst_msg:
+                lookup[user_msg] = asst_msg
+
+    print(f"Loaded {len(lookup)} reference answers from {sft_path}")
+    return lookup
+
+
+def load_prompts(path: Path, reference_lookup: dict[str, str] | None = None) -> list[dict]:
+    """
+    Load GRPO data as list of dicts with 'prompt', optional 'expected_section',
+    and optional 'reference' answer (populated from reference_lookup if provided).
+    """
+    if reference_lookup is None:
+        reference_lookup = {}
     records = []
+    matched = 0
     with open(path) as f:
         for line in f:
             line = line.strip()
             if line:
                 rec = json.loads(line)
+                prompt = rec["prompt"]
+                reference = reference_lookup.get(prompt, None)
+                if reference:
+                    matched += 1
                 records.append({
-                    "prompt": rec["prompt"],
+                    "prompt": prompt,
                     "expected_section": rec.get("expected_section", None),
+                    "reference": reference,
                 })
+    if reference_lookup:
+        print(f"Reference answers matched: {matched}/{len(records)} GRPO prompts "
+              f"({matched / max(len(records), 1):.1%})")
     return records
 
 
@@ -340,7 +397,13 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     ref_model.eval()
     ref_model.freeze()
 
-    prompt_records = load_prompts(GRPO_DATA)
+    # Build reference lookup from SFT data for factual accuracy scoring.
+    # Falls back gracefully: if the file is absent, all references will be None
+    # and factual_accuracy_score() returns the neutral 0.5 score.
+    sft_path = get_sft_data_path()
+    reference_lookup = build_reference_lookup(sft_path)
+
+    prompt_records = load_prompts(GRPO_DATA, reference_lookup)
     print(f"Loaded {len(prompt_records)} GRPO prompts.")
 
     optimizer = optim.Adam(learning_rate=args.learning_rate)
@@ -363,6 +426,7 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
             rec = prompt_records[rng.integers(len(prompt_records))]
             prompt = rec["prompt"]
             expected_section = rec.get("expected_section", None)
+            reference = rec.get("reference", None)
 
             # Generate K completions (no grad)
             policy_model.eval()
@@ -374,8 +438,11 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
             )
             policy_model.train()
 
-            # Score completions with citation accuracy
-            rewards = [compute_reward(prompt, c, expected_section=expected_section) for c in completions]
+            # Score completions with citation and factual accuracy
+            rewards = [
+                compute_reward(prompt, c, reference=reference, expected_section=expected_section)
+                for c in completions
+            ]
 
             # Compute loss
             def loss_fn(model):
@@ -421,7 +488,7 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    global _CLI_MODEL_PATH, _CLI_START_ADAPTER, _CLI_OUTPUT_DIR, _CLI_LOG_FILE
+    global _CLI_MODEL_PATH, _CLI_START_ADAPTER, _CLI_OUTPUT_DIR, _CLI_LOG_FILE, _CLI_SFT_DATA
 
     parser = argparse.ArgumentParser(description="GRPO training via MLX")
     parser.add_argument("--model", type=str, default=None,
@@ -432,6 +499,9 @@ def main() -> None:
                         help="Path to save GRPO adapters (default: outputs/grpo/adapters)")
     parser.add_argument("--data", type=str, default=None,
                         help="Path to GRPO data JSONL (default: data/processed/train/grpo.jsonl)")
+    parser.add_argument("--sft-data", type=str, default=None,
+                        help="Path to SFT JSONL with reference answers for factual accuracy scoring "
+                             "(default: data/train_v2/sft.jsonl). Pass 'none' to disable.")
     parser.add_argument("--iters", type=int, default=DEFAULTS["iters"])
     parser.add_argument("--group-size", type=int, default=DEFAULTS["group_size"],
                         help="Number of completions to generate per prompt (K)")
@@ -461,6 +531,11 @@ def main() -> None:
     if args.data:
         global GRPO_DATA
         GRPO_DATA = Path(args.data)
+    if args.sft_data:
+        if args.sft_data.lower() == "none":
+            _CLI_SFT_DATA = ""  # Empty string signals: no SFT reference file
+        else:
+            _CLI_SFT_DATA = args.sft_data
 
     check_dependencies()
     model_path = resolve_model_path()

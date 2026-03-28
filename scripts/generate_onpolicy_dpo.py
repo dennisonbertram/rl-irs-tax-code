@@ -20,6 +20,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SFT_DATA = PROJECT_ROOT / "data" / "processed" / "grounded_sft_full.jsonl"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "processed" / "onpolicy_dpo_v2.jsonl"
 
+# Shared citation utilities (canonical regex)
+_SCRIPT_DIR = Path(__file__).parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from citation_utils import extract_irc_sections, extract_numbers  # noqa: E402
+
 SYSTEM_PROMPT = (
     "You are a tax law expert specializing in the Internal Revenue Code (IRC). "
     "Always cite specific IRC sections and subsections when answering questions. "
@@ -49,29 +55,6 @@ def query_ollama(prompt: str, model: str, base_url: str, timeout: int = 120) -> 
     data = json.loads(resp.read().decode("utf-8"))
     return data.get("response", "").strip()
 
-
-def extract_irc_sections(text: str) -> set:
-    """Extract IRC section references from text (e.g., 'Section 162', '§ 401(k)')."""
-    patterns = [
-        r'[Ss]ection\s+(\d+[A-Za-z]?)',
-        r'§\s*(\d+[A-Za-z]?)',
-        r'IRC\s+(\d+[A-Za-z]?)',
-        r'I\.R\.C\.\s*§?\s*(\d+[A-Za-z]?)',
-    ]
-    sections = set()
-    for pat in patterns:
-        sections.update(re.findall(pat, text))
-    return sections
-
-
-def extract_numbers(text: str) -> set:
-    """Extract dollar amounts and percentages from text."""
-    amounts = set()
-    # Dollar amounts
-    amounts.update(re.findall(r'\$[\d,]+(?:\.\d+)?', text))
-    # Percentages
-    amounts.update(re.findall(r'\d+(?:\.\d+)?%', text))
-    return amounts
 
 
 def is_meaningfully_wrong(model_answer: str, correct_answer: str) -> tuple[bool, str]:

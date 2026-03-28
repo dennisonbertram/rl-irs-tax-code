@@ -1,65 +1,69 @@
-# IRS Tax Code RL Training - Execution Plan
+# Active Plan: Training Data Quality Improvement
 
-## Goal
-Fine-tune a small local LLM on IRS tax code data using SFT + RL (DPO/GRPO), deploy via Ollama.
+**Goal:** Fix critical training data issues that cause factual hallucinations and reward function failures.
 
-## System Context
-- Apple M4 Max, 128GB unified RAM, 40-core Metal GPU
-- 41GB free disk (constraint — use 3B model to be safe)
-- Ollama 0.18.2 installed, no models pulled
-- Python 3.14, pip available, no ML packages installed
+**Milestone:** M-002 — Accurate Training Data v2
 
-## Architecture Decision
-- **Base model**: Qwen 2.5 3B Instruct (small enough for disk, strong reasoning)
-- **Training framework**: Unsloth + TRL (QLoRA SFT, then DPO/GRPO for RL)
-- **Alternative**: MLX-lm for SFT if Unsloth MPS support is problematic
-- **Data**: IRC Title 26 XML + Treasury Regulations XML → parsed into JSONL
-- **Export**: GGUF Q4_K_M → Ollama
+## Wave 1 (Parallel — No Dependencies)
 
-## Phases
+### TASK-001: Audit and Clean Training Splits
+- Inventory all files in `data/train/`, `data/eval/`, `data/processed/`
+- Determine which are old template-based vs new grounded data
+- Remove/isolate old low-quality data
+- Create clean splits using ONLY grounded data
+- **Files:** `data/train/`, `data/eval/`
 
-### Phase 1: Environment Setup [TASK-001]
-- Install Python ML stack: torch, transformers, trl, peft, datasets, accelerate, unsloth, huggingface-hub
-- Pull Qwen 2.5 3B via Ollama for baseline testing
-- Download HuggingFace weights for Qwen 2.5 3B Instruct
+### TASK-002: Research Current-Year Inflation-Adjusted Amounts
+- Find IRS Revenue Procedures for tax year 2024 (Rev. Proc. 2023-34) and 2025 (Rev. Proc. 2024-40)
+- Compile a reference JSON dataset of key inflation-adjusted figures:
+  - Standard deduction (all filing statuses)
+  - §179 expensing limit and phaseout
+  - Tax bracket thresholds
+  - Contribution limits (401k, IRA, HSA)
+  - Estate/gift tax exclusions
+  - AMT exemptions
+  - Earned income credit thresholds
+- **Output:** `data/reference/inflation_adjusted_amounts.json`
 
-### Phase 2: Data Acquisition [TASK-002]
-- Download IRC Title 26 XML from uscode.house.gov
-- Download 26 CFR XML from govinfo.gov
-- Store in data/raw/
+### TASK-003: Fix GRPO Reward Function
+- Add factual accuracy component: extract numbers from reference answer, check against model response
+- Fix `batch_reward` to pass `expected_section`
+- Unify citation regex across `grpo_reward.py`, `evaluate.py`, and `generate_onpolicy_dpo.py`
+- **Files:** `scripts/grpo_reward.py`, `scripts/evaluate.py`
 
-### Phase 3: Data Pipeline [TASK-003]
-- Parse IRC XML into structured text (section-level chunks)
-- Parse CFR XML into structured text
-- Generate SFT training pairs (instruction/response format)
-- Generate DPO preference pairs
-- Generate GRPO prompts with verifiable reward signals
-- Output: data/processed/sft_train.jsonl, data/processed/dpo_train.jsonl, data/processed/grpo_train.jsonl
-- Split 90/10 train/eval
+## Wave 2 (After Wave 1)
 
-### Phase 4: SFT Training [TASK-004]
-- QLoRA fine-tuning on SFT dataset
-- Qwen 2.5 3B, r=32, 4-bit quantization
-- 2-3 epochs, lr=2e-4
-- Evaluate on held-out set
-- Save checkpoint
+### TASK-004: Generate Grounded Data from CFR Sections
+- Extend `generate_grounded_data.py` to process CFR sections (currently IRC-only)
+- Generate Q&A pairs from the 6,149 CFR regulation sections
+- Apply same citation validation and quality checks
+- **Depends on:** TASK-001 (clean data pipeline understanding)
+- **Note:** Requires OpenAI API calls — cost estimate needed before execution
+- **Files:** `scripts/generate_grounded_data.py`, `data/processed/`
 
-### Phase 5: RL Training (DPO + GRPO) [TASK-005]
-- DPO on preference pairs from SFT checkpoint
-- GRPO with rule-based rewards (IRC section citation, factual accuracy)
-- 1 epoch each
-- Save final checkpoint
+### TASK-005: Inject Inflation-Adjusted Amounts
+- Using the reference data from TASK-002, create supplementary training examples
+- Add current-year dollar amounts for high-impact sections
+- Generate SFT pairs that teach the model current amounts with proper caveats
+- **Depends on:** TASK-001, TASK-002
 
-### Phase 6: Export & Deploy [TASK-006]
-- Merge LoRA adapters
-- Export to GGUF Q4_K_M
-- Create Ollama Modelfile
-- Import to Ollama
-- Run evaluation prompts
+### TASK-006: Section Importance Weighting
+- Define tier system: Tier 1 (high-traffic), Tier 2 (moderate), Tier 3 (low)
+- Tier 1 sections: 1, 11, 21, 24, 25A, 61, 63, 67, 68, 83, 101, 104, 121, 125, 132, 162, 163, 164, 165, 167, 168, 170, 179, 197, 199A, 213, 217, 219, 263, 267, 351, 368, 401, 402, 403, 408, 409A, 414, 415, 421, 422, 453, 469, 501, 509, 512, 1001, 1014, 1031, 1033, 1202, 1221, 1231, 1245, 7701
+- Implement upsampling for Tier 1, normal for Tier 2, downsampling for Tier 3
+- **Depends on:** TASK-001
 
-## Task Dependencies
-TASK-001 → TASK-002 (parallel possible)
-TASK-001 + TASK-002 → TASK-003
-TASK-003 → TASK-004
-TASK-004 → TASK-005
-TASK-005 → TASK-006
+## Wave 3 (Final Assembly)
+
+### TASK-007: Assemble Final Clean Training Splits
+- Combine: clean grounded IRC data + CFR data + inflation-adjusted supplements
+- Apply importance weighting
+- Generate final `train/sft.jsonl`, `train/dpo.jsonl`, `train/grpo.jsonl`
+- Split train/eval (90/10)
+- **Depends on:** TASK-004, TASK-005, TASK-006
+
+### TASK-008: Validate Data Quality
+- Sample and manually verify 50 examples from new training data
+- Run statistics: topic coverage, section distribution, answer length
+- Compare old vs new data volumes and quality metrics
+- **Depends on:** TASK-007

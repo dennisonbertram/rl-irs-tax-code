@@ -26,6 +26,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Shared citation utilities (canonical regex)
+_SCRIPT_DIR = Path(__file__).parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from citation_utils import extract_irc_sections  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -262,11 +268,9 @@ def score_response(
     """
     response_lower = response.lower()
 
-    # Citation score
-    cited = any(
-        re.search(rf"\b{re.escape(sec)}\b", response, re.IGNORECASE)
-        for sec in expected_sections
-    )
+    # Citation score — use canonical IRC citation regex from citation_utils
+    cited_in_response = extract_irc_sections(response)
+    cited = any(sec in cited_in_response for sec in expected_sections)
     citation_score = 0.4 if cited else 0.0
 
     # Keyword coverage

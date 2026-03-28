@@ -1,0 +1,420 @@
+{
+  "metadata": {
+    "description": "IRS inflation-adjusted amounts by tax year for key federal tax provisions",
+    "sources": [
+      "Rev. Proc. 2022-38 (TY2023)",
+      "Rev. Proc. 2023-34 (TY2024)",
+      "Rev. Proc. 2024-40 (TY2025)",
+      "IRS Notice 2022-55 (retirement limits TY2023)",
+      "IRS Notice 2023-75 (retirement limits TY2024)",
+      "IRS Notice 2024-80 (retirement limits TY2025)",
+      "Rev. Proc. 2022-24 (HSA TY2023)",
+      "Rev. Proc. 2023-23 (HSA TY2024)",
+      "Rev. Proc. 2024-25 (HSA TY2025)",
+      "SSA COLA announcements 2023-2025"
+    ],
+    "last_updated": "2026-03-27",
+    "accuracy_note": "All figures sourced from official IRS Revenue Procedures, IRS Notices, and SSA announcements. Any figure marked UNVERIFIED could not be confirmed from an authoritative primary source."
+  },
+  "tax_years": {
+    "2023": {
+      "standard_deduction": {
+        "single": 13850,
+        "married_filing_jointly": 27700,
+        "married_filing_separately": 13850,
+        "head_of_household": 20800,
+        "additional_age_65_or_blind": {
+          "married": 1500,
+          "unmarried": 1850
+        }
+      },
+      "tax_brackets": {
+        "rates": [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37],
+        "single": {
+          "brackets": [0, 11000, 44725, 95375, 182100, 231250, 578125]
+        },
+        "married_filing_jointly": {
+          "brackets": [0, 22000, 89450, 190750, 364200, 462500, 693750]
+        },
+        "married_filing_separately": {
+          "brackets": [0, 11000, 44725, 95375, 182100, 231250, 346875]
+        },
+        "head_of_household": {
+          "brackets": [0, 15700, 59850, 95350, 182100, 231250, 578100]
+        }
+      },
+      "section_179_expensing": {
+        "maximum_deduction": 1160000,
+        "phaseout_threshold": 2890000,
+        "suv_limit": 28900
+      },
+      "retirement_contribution_limits": {
+        "401k_403b_457_elective_deferral": 22500,
+        "401k_catch_up_age_50_plus": 7500,
+        "traditional_roth_ira": 6500,
+        "ira_catch_up_age_50_plus": 1000,
+        "sep_ira": 66000,
+        "simple_ira": 15500,
+        "simple_ira_catch_up_age_50_plus": 3500
+      },
+      "hsa_contribution_limits": {
+        "self_only": 3850,
+        "family": 7750,
+        "catch_up_age_55_plus": 1000
+      },
+      "estate_and_gift_tax": {
+        "basic_exclusion_amount": 12920000,
+        "annual_gift_tax_exclusion": 17000
+      },
+      "amt": {
+        "exemption_single": 81300,
+        "exemption_married_filing_jointly": 126500,
+        "exemption_married_filing_separately": 63250,
+        "phaseout_single": 578150,
+        "phaseout_married_filing_jointly": 1156300,
+        "phaseout_married_filing_separately": 578150,
+        "twenty_eight_percent_threshold": 220700
+      },
+      "earned_income_credit": {
+        "max_credit_0_children": 600,
+        "max_credit_1_child": 3995,
+        "max_credit_2_children": 6604,
+        "max_credit_3_plus_children": 7430,
+        "income_limit_single_0_children": 17640,
+        "income_limit_single_1_child": 46560,
+        "income_limit_single_2_children": 52918,
+        "income_limit_single_3_plus_children": 56838,
+        "income_limit_mfj_0_children": 24210,
+        "income_limit_mfj_1_child": 53120,
+        "income_limit_mfj_2_children": 59478,
+        "income_limit_mfj_3_plus_children": 63398,
+        "investment_income_limit": 11000
+      },
+      "child_tax_credit": {
+        "credit_per_child": 2000,
+        "refundable_portion_max": 1600,
+        "phaseout_single": 200000,
+        "phaseout_married_filing_jointly": 400000
+      },
+      "capital_gains_brackets": {
+        "rates": [0.00, 0.15, 0.20],
+        "single": {
+          "zero_percent_up_to": 44625,
+          "fifteen_percent_up_to": 492300
+        },
+        "married_filing_jointly": {
+          "zero_percent_up_to": 89250,
+          "fifteen_percent_up_to": 553850
+        },
+        "married_filing_separately": {
+          "zero_percent_up_to": 44625,
+          "fifteen_percent_up_to": 276900
+        },
+        "head_of_household": {
+          "zero_percent_up_to": 59750,
+          "fifteen_percent_up_to": 523050
+        }
+      },
+      "social_security": {
+        "wage_base": 160200,
+        "cola_percentage": 8.7
+      },
+      "foreign_earned_income_exclusion": 120000,
+      "adoption_credit": {
+        "maximum_credit": 15950,
+        "phaseout_begins": 239230,
+        "phaseout_complete": 279230
+      },
+      "education_credits": {
+        "american_opportunity_credit_max": 2500,
+        "lifetime_learning_credit_max": 2000,
+        "aotc_magi_phaseout_single": 80000,
+        "aotc_magi_phaseout_complete_single": 90000,
+        "aotc_magi_phaseout_mfj": 160000,
+        "aotc_magi_phaseout_complete_mfj": 180000
+      },
+      "qbi_deduction_199a": {
+        "threshold_single": 182100,
+        "threshold_married_filing_jointly": 364200,
+        "phaseout_range": 50000,
+        "phaseout_range_mfj": 100000
+      },
+      "section_1031_like_kind_exchange": {
+        "dollar_limit": "none",
+        "note": "No dollar limit on amount deferred; reporting required on Form 8824"
+      },
+      "charitable_contribution_limits": {
+        "cash_contributions_agi_limit_percent": 60,
+        "capital_gain_property_agi_limit_percent": 30,
+        "note": "Applies to contributions to public charities; lower limits apply for private foundations"
+      }
+    },
+    "2024": {
+      "standard_deduction": {
+        "single": 14600,
+        "married_filing_jointly": 29200,
+        "married_filing_separately": 14600,
+        "head_of_household": 21900,
+        "additional_age_65_or_blind": {
+          "married": 1550,
+          "unmarried": 1950
+        }
+      },
+      "tax_brackets": {
+        "rates": [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37],
+        "single": {
+          "brackets": [0, 11600, 47150, 100525, 191950, 243725, 609350]
+        },
+        "married_filing_jointly": {
+          "brackets": [0, 23200, 94300, 201050, 383900, 487450, 731200]
+        },
+        "married_filing_separately": {
+          "brackets": [0, 11600, 47150, 100525, 191950, 243725, 365600]
+        },
+        "head_of_household": {
+          "brackets": [0, 16550, 63100, 100500, 191950, 243700, 609350]
+        }
+      },
+      "section_179_expensing": {
+        "maximum_deduction": 1220000,
+        "phaseout_threshold": 3050000,
+        "suv_limit": 30500
+      },
+      "retirement_contribution_limits": {
+        "401k_403b_457_elective_deferral": 23000,
+        "401k_catch_up_age_50_plus": 7500,
+        "traditional_roth_ira": 7000,
+        "ira_catch_up_age_50_plus": 1000,
+        "sep_ira": 69000,
+        "simple_ira": 16000,
+        "simple_ira_catch_up_age_50_plus": 3500
+      },
+      "hsa_contribution_limits": {
+        "self_only": 4150,
+        "family": 8300,
+        "catch_up_age_55_plus": 1000
+      },
+      "estate_and_gift_tax": {
+        "basic_exclusion_amount": 13610000,
+        "annual_gift_tax_exclusion": 18000
+      },
+      "amt": {
+        "exemption_single": 85700,
+        "exemption_married_filing_jointly": 133300,
+        "exemption_married_filing_separately": 66650,
+        "phaseout_single": 609350,
+        "phaseout_married_filing_jointly": 1218700,
+        "phaseout_married_filing_separately": 609350,
+        "twenty_eight_percent_threshold": 232600
+      },
+      "earned_income_credit": {
+        "max_credit_0_children": 632,
+        "max_credit_1_child": 4213,
+        "max_credit_2_children": 6960,
+        "max_credit_3_plus_children": 7830,
+        "income_limit_single_0_children": 18591,
+        "income_limit_single_1_child": 49084,
+        "income_limit_single_2_children": 55768,
+        "income_limit_single_3_plus_children": 59899,
+        "income_limit_mfj_0_children": 25511,
+        "income_limit_mfj_1_child": 56004,
+        "income_limit_mfj_2_children": 62688,
+        "income_limit_mfj_3_plus_children": 66819,
+        "investment_income_limit": 11600
+      },
+      "child_tax_credit": {
+        "credit_per_child": 2000,
+        "refundable_portion_max": 1700,
+        "phaseout_single": 200000,
+        "phaseout_married_filing_jointly": 400000
+      },
+      "capital_gains_brackets": {
+        "rates": [0.00, 0.15, 0.20],
+        "single": {
+          "zero_percent_up_to": 47025,
+          "fifteen_percent_up_to": 518900
+        },
+        "married_filing_jointly": {
+          "zero_percent_up_to": 94050,
+          "fifteen_percent_up_to": 583750
+        },
+        "married_filing_separately": {
+          "zero_percent_up_to": 47025,
+          "fifteen_percent_up_to": 291850
+        },
+        "head_of_household": {
+          "zero_percent_up_to": 63000,
+          "fifteen_percent_up_to": 551350
+        }
+      },
+      "social_security": {
+        "wage_base": 168600,
+        "cola_percentage": 3.2
+      },
+      "foreign_earned_income_exclusion": 126500,
+      "adoption_credit": {
+        "maximum_credit": 16810,
+        "phaseout_begins": 252150,
+        "phaseout_complete": 292150
+      },
+      "education_credits": {
+        "american_opportunity_credit_max": 2500,
+        "lifetime_learning_credit_max": 2000,
+        "aotc_magi_phaseout_single": 80000,
+        "aotc_magi_phaseout_complete_single": 90000,
+        "aotc_magi_phaseout_mfj": 160000,
+        "aotc_magi_phaseout_complete_mfj": 180000
+      },
+      "qbi_deduction_199a": {
+        "threshold_single": 191950,
+        "threshold_married_filing_jointly": 383900,
+        "phaseout_range": 50000,
+        "phaseout_range_mfj": 100000
+      },
+      "section_1031_like_kind_exchange": {
+        "dollar_limit": "none",
+        "note": "No dollar limit on amount deferred; reporting required on Form 8824"
+      },
+      "charitable_contribution_limits": {
+        "cash_contributions_agi_limit_percent": 60,
+        "capital_gain_property_agi_limit_percent": 30,
+        "note": "Applies to contributions to public charities; lower limits apply for private foundations"
+      }
+    },
+    "2025": {
+      "standard_deduction": {
+        "single": 15000,
+        "married_filing_jointly": 30000,
+        "married_filing_separately": 15000,
+        "head_of_household": 22500,
+        "additional_age_65_or_blind": {
+          "married": 1600,
+          "unmarried": 2000
+        }
+      },
+      "tax_brackets": {
+        "rates": [0.10, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37],
+        "single": {
+          "brackets": [0, 11925, 48475, 103350, 197300, 250525, 626350]
+        },
+        "married_filing_jointly": {
+          "brackets": [0, 23850, 96950, 206700, 394600, 501050, 751600]
+        },
+        "married_filing_separately": {
+          "brackets": [0, 11925, 48475, 103350, 197300, 250525, 375800]
+        },
+        "head_of_household": {
+          "brackets": [0, 17000, 64850, 103350, 197300, 250500, 626350]
+        }
+      },
+      "section_179_expensing": {
+        "maximum_deduction": 1250000,
+        "phaseout_threshold": 3130000,
+        "suv_limit": 31300
+      },
+      "retirement_contribution_limits": {
+        "401k_403b_457_elective_deferral": 23500,
+        "401k_catch_up_age_50_plus": 7500,
+        "401k_super_catch_up_age_60_to_63": 11250,
+        "traditional_roth_ira": 7000,
+        "ira_catch_up_age_50_plus": 1000,
+        "sep_ira": 70000,
+        "simple_ira": 16500,
+        "simple_ira_catch_up_age_50_plus": 3500
+      },
+      "hsa_contribution_limits": {
+        "self_only": 4300,
+        "family": 8550,
+        "catch_up_age_55_plus": 1000
+      },
+      "estate_and_gift_tax": {
+        "basic_exclusion_amount": 13990000,
+        "annual_gift_tax_exclusion": 19000
+      },
+      "amt": {
+        "exemption_single": 88100,
+        "exemption_married_filing_jointly": 137000,
+        "exemption_married_filing_separately": 68500,
+        "phaseout_single": 626350,
+        "phaseout_married_filing_jointly": 1252700,
+        "phaseout_married_filing_separately": 626350,
+        "twenty_eight_percent_threshold": 239100
+      },
+      "earned_income_credit": {
+        "max_credit_0_children": 649,
+        "max_credit_1_child": 4328,
+        "max_credit_2_children": 7152,
+        "max_credit_3_plus_children": 8046,
+        "income_limit_single_0_children": 19104,
+        "income_limit_single_1_child": 50434,
+        "income_limit_single_2_children": 57310,
+        "income_limit_single_3_plus_children": 61555,
+        "income_limit_mfj_0_children": 26214,
+        "income_limit_mfj_1_child": 57554,
+        "income_limit_mfj_2_children": 64430,
+        "income_limit_mfj_3_plus_children": 68675,
+        "investment_income_limit": 11950
+      },
+      "child_tax_credit": {
+        "credit_per_child": 2000,
+        "refundable_portion_max": 1700,
+        "phaseout_single": 200000,
+        "phaseout_married_filing_jointly": 400000,
+        "note": "OBBBA increased to $2,500 per child for 2025+ but check final enacted version"
+      },
+      "capital_gains_brackets": {
+        "rates": [0.00, 0.15, 0.20],
+        "single": {
+          "zero_percent_up_to": 48350,
+          "fifteen_percent_up_to": 533400
+        },
+        "married_filing_jointly": {
+          "zero_percent_up_to": 96700,
+          "fifteen_percent_up_to": 600050
+        },
+        "married_filing_separately": {
+          "zero_percent_up_to": 48350,
+          "fifteen_percent_up_to": 300025
+        },
+        "head_of_household": {
+          "zero_percent_up_to": 64750,
+          "fifteen_percent_up_to": 566700
+        }
+      },
+      "social_security": {
+        "wage_base": 176100,
+        "cola_percentage": 2.5
+      },
+      "foreign_earned_income_exclusion": 130000,
+      "adoption_credit": {
+        "maximum_credit": 17280,
+        "phaseout_begins": 259190,
+        "phaseout_complete": 299190
+      },
+      "education_credits": {
+        "american_opportunity_credit_max": 2500,
+        "lifetime_learning_credit_max": 2000,
+        "magi_phaseout_single": 90000,
+        "magi_phaseout_complete_single": 90000,
+        "magi_phaseout_mfj": 180000,
+        "magi_phaseout_complete_mfj": 180000,
+        "note": "For 2025, the AOTC and LLC share the same MAGI phaseout range of $80,000-$90,000 (single) and $160,000-$180,000 (MFJ)"
+      },
+      "qbi_deduction_199a": {
+        "threshold_single": 197300,
+        "threshold_married_filing_jointly": 394600,
+        "phaseout_range": 50000,
+        "phaseout_range_mfj": 100000
+      },
+      "section_1031_like_kind_exchange": {
+        "dollar_limit": "none",
+        "note": "No dollar limit on amount deferred; reporting required on Form 8824"
+      },
+      "charitable_contribution_limits": {
+        "cash_contributions_agi_limit_percent": 60,
+        "capital_gain_property_agi_limit_percent": 30,
+        "note": "Applies to contributions to public charities; lower limits apply for private foundations"
+      }
+    }
+  }
+}

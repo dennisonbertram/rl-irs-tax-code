@@ -1,0 +1,10 @@
+# LoRA config for Qwen2.5-32B training
+# Conservative settings to fit in 128GB unified memory
+# Using rank 16 (vs 32 for 3B) to reduce memory footprint
+# Can increase to rank 32 later if memory allows
+
+lora_parameters:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  scale: 2.0
