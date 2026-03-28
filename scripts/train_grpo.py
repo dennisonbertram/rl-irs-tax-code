@@ -40,6 +40,12 @@ GRPO_ADAPTER = PROJECT_ROOT / "outputs" / "grpo" / "adapters"
 GRPO_DATA = PROJECT_ROOT / "data" / "processed" / "train" / "grpo.jsonl"
 LOG_FILE = PROJECT_ROOT / "outputs" / "grpo" / "train.log"
 
+# CLI overrides
+_CLI_MODEL_PATH = None
+_CLI_START_ADAPTER = None
+_CLI_OUTPUT_DIR = None
+_CLI_LOG_FILE = None
+
 # ---------------------------------------------------------------------------
 # Hyperparameters
 # ---------------------------------------------------------------------------
@@ -96,6 +102,12 @@ def check_dependencies() -> None:
 
 
 def resolve_model_path() -> Path:
+    if _CLI_MODEL_PATH is not None:
+        p = Path(_CLI_MODEL_PATH)
+        if p.exists() and (p / "config.json").exists():
+            return p
+        print(f"ERROR: No model found at {p}")
+        sys.exit(1)
     if MODEL_MLX.exists() and (MODEL_MLX / "config.json").exists():
         return MODEL_MLX
     if MODEL_HF.exists() and (MODEL_HF / "config.json").exists():
@@ -105,8 +117,31 @@ def resolve_model_path() -> Path:
     sys.exit(1)
 
 
+def get_grpo_adapter_path() -> Path:
+    if _CLI_OUTPUT_DIR is not None:
+        return Path(_CLI_OUTPUT_DIR)
+    return GRPO_ADAPTER
+
+
+def get_log_file() -> Path:
+    if _CLI_LOG_FILE is not None:
+        return Path(_CLI_LOG_FILE)
+    return LOG_FILE
+
+
 def resolve_start_adapter() -> Path | None:
     """Return the best available starting adapter (DPO > SFT > None)."""
+    if _CLI_START_ADAPTER is not None:
+        p = Path(_CLI_START_ADAPTER)
+        if (p / "adapter_config.json").exists():
+            print(f"Starting from adapter: {p}")
+            return p
+        # Also check if the safetensors file exists (even without adapter_config.json)
+        if (p / "adapters.safetensors").exists():
+            print(f"Starting from adapter: {p} (no adapter_config.json found, using safetensors)")
+            return p
+        print(f"WARNING: Specified adapter path {p} has no adapter_config.json or safetensors")
+        return None
     for adapter_dir in [DPO_ADAPTER, SFT_ADAPTER]:
         if (adapter_dir / "adapter_config.json").exists():
             print(f"Starting from adapter: {adapter_dir}")
@@ -280,8 +315,11 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
     from grpo_reward import compute_reward  # noqa: E402
 
-    GRPO_ADAPTER.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    grpo_adapter = get_grpo_adapter_path()
+    log_file = get_log_file()
+
+    grpo_adapter.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"\nLoading policy model from {model_path} ...")
     policy_model, tokenizer = load(str(model_path))
@@ -313,7 +351,7 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     start_time = time.time()
     best_avg_reward = -float("inf")
 
-    with open(LOG_FILE, "w") as log:
+    with open(log_file, "w") as log:
         log.write(f"GRPO Training — {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         log.write(
             f"group_size={args.group_size}, lr={args.learning_rate}, "
@@ -366,16 +404,16 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
                 log.flush()
 
             if step % args.save_every == 0 or step == args.iters:
-                save_lora_weights(policy_model, str(GRPO_ADAPTER / "adapters.safetensors"))
+                save_lora_weights(policy_model, str(grpo_adapter / "adapters.safetensors"))
                 print(f"  Saved adapter checkpoint at step {step}")
                 if avg_reward > best_avg_reward:
                     best_avg_reward = avg_reward
-                    save_lora_weights(policy_model, str(GRPO_ADAPTER / "adapters_best.safetensors"))
+                    save_lora_weights(policy_model, str(grpo_adapter / "adapters_best.safetensors"))
 
     total = time.time() - start_time
     print(f"\nGRPO training complete in {total:.1f}s")
     print(f"Best average reward: {best_avg_reward:.3f}")
-    print(f"Final adapter saved to: {GRPO_ADAPTER}")
+    print(f"Final adapter saved to: {grpo_adapter}")
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +421,17 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global _CLI_MODEL_PATH, _CLI_START_ADAPTER, _CLI_OUTPUT_DIR, _CLI_LOG_FILE
+
     parser = argparse.ArgumentParser(description="GRPO training via MLX")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Path to base model directory (default: models/qwen25-3b-mlx)")
+    parser.add_argument("--adapter-path", type=str, default=None,
+                        help="Path to starting adapter (DPO or SFT) to load weights from")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Path to save GRPO adapters (default: outputs/grpo/adapters)")
+    parser.add_argument("--data", type=str, default=None,
+                        help="Path to GRPO data JSONL (default: data/processed/train/grpo.jsonl)")
     parser.add_argument("--iters", type=int, default=DEFAULTS["iters"])
     parser.add_argument("--group-size", type=int, default=DEFAULTS["group_size"],
                         help="Number of completions to generate per prompt (K)")
@@ -401,6 +449,18 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate setup without running training")
     args = parser.parse_args()
+
+    # Set CLI overrides
+    if args.model:
+        _CLI_MODEL_PATH = args.model
+    if args.adapter_path:
+        _CLI_START_ADAPTER = args.adapter_path
+    if args.output_dir:
+        _CLI_OUTPUT_DIR = args.output_dir
+        _CLI_LOG_FILE = str(Path(args.output_dir).parent / "train.log")
+    if args.data:
+        global GRPO_DATA
+        GRPO_DATA = Path(args.data)
 
     check_dependencies()
     model_path = resolve_model_path()

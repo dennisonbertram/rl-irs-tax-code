@@ -77,7 +77,13 @@ def resolve_adapter(override: str | None) -> Path | None:
     return None
 
 
-def resolve_base_model() -> Path:
+def resolve_base_model(override: str | None = None) -> Path:
+    if override:
+        p = Path(override)
+        if p.exists() and (p / "config.json").exists():
+            return p
+        print(f"ERROR: Base model not found at {p}")
+        sys.exit(1)
     if MODEL_MLX.exists() and (MODEL_MLX / "config.json").exists():
         return MODEL_MLX
     if MODEL_HF.exists() and (MODEL_HF / "config.json").exists():
@@ -310,6 +316,12 @@ def import_to_ollama(modelfile_path: Path, model_name: str, dry_run: bool) -> No
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export trained model to Ollama")
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Path to base model directory (default: auto-detect qwen25-3b-mlx or qwen2.5-3b-instruct)",
+    )
+    parser.add_argument(
         "--adapter-path",
         type=str,
         default=None,
@@ -317,6 +329,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-name",
+        "--name",
         type=str,
         default=OLLAMA_MODEL_NAME,
         help=f"Ollama model name (default: {OLLAMA_MODEL_NAME})",
@@ -337,14 +350,31 @@ def main() -> None:
         help="Skip Q4_K_M quantization",
     )
     parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Override base output directory (default: outputs/final/)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands without executing them",
     )
     args = parser.parse_args()
 
+    global FUSED_PATH, GGUF_PATH, GGUF_Q4_PATH, MODELFILE_PATH
+
     model_name = args.model_name
-    base_model = resolve_base_model()
+
+    # Override output paths if specified
+    if args.output_dir:
+        out = Path(args.output_dir)
+        FUSED_PATH = out / "fused"
+        GGUF_PATH = out / "model-q8.gguf"
+        GGUF_Q4_PATH = out / "model-q4_k_m.gguf"
+        MODELFILE_PATH = out / "Modelfile"
+
+    base_model = resolve_base_model(args.model)
     adapter_path = resolve_adapter(args.adapter_path)
 
     print("\n" + "=" * 70)

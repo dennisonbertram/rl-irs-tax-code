@@ -45,6 +45,12 @@ DPO_ADAPTER = PROJECT_ROOT / "outputs" / "dpo" / "adapters"
 DPO_DATA = PROJECT_ROOT / "data" / "processed" / "train" / "dpo.jsonl"
 LOG_FILE = PROJECT_ROOT / "outputs" / "dpo" / "train.log"
 
+# These can be overridden by CLI args
+_CLI_MODEL_PATH = None
+_CLI_SFT_ADAPTER = None
+_CLI_OUTPUT_DIR = None
+_CLI_LOG_FILE = None
+
 # ---------------------------------------------------------------------------
 # Hyperparameters
 # ---------------------------------------------------------------------------
@@ -89,6 +95,12 @@ def check_dependencies() -> None:
 
 
 def resolve_model_path() -> Path:
+    if _CLI_MODEL_PATH is not None:
+        p = Path(_CLI_MODEL_PATH)
+        if p.exists() and (p / "config.json").exists():
+            return p
+        print(f"ERROR: No model found at {p}")
+        sys.exit(1)
     if MODEL_MLX.exists() and (MODEL_MLX / "config.json").exists():
         return MODEL_MLX
     if MODEL_HF.exists() and (MODEL_HF / "config.json").exists():
@@ -113,16 +125,35 @@ def check_data() -> None:
     print(f"DPO data OK: {DPO_DATA}")
 
 
+def get_sft_adapter_path() -> Path:
+    if _CLI_SFT_ADAPTER is not None:
+        return Path(_CLI_SFT_ADAPTER)
+    return SFT_ADAPTER
+
+
+def get_dpo_adapter_path() -> Path:
+    if _CLI_OUTPUT_DIR is not None:
+        return Path(_CLI_OUTPUT_DIR)
+    return DPO_ADAPTER
+
+
+def get_log_file() -> Path:
+    if _CLI_LOG_FILE is not None:
+        return Path(_CLI_LOG_FILE)
+    return LOG_FILE
+
+
 def check_sft_adapter() -> None:
-    adapter_config = SFT_ADAPTER / "adapter_config.json"
+    sft = get_sft_adapter_path()
+    adapter_config = sft / "adapter_config.json"
     if not adapter_config.exists():
         print(
-            f"WARNING: SFT adapter not found at {SFT_ADAPTER}.\n"
+            f"WARNING: SFT adapter not found at {sft}.\n"
             "DPO will train from the base model without SFT initialization.\n"
             "Run train_sft.py first for best results."
         )
     else:
-        print(f"SFT adapter found: {SFT_ADAPTER}")
+        print(f"SFT adapter found: {sft}")
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +259,7 @@ def sequence_log_prob(
     import mlx.core as mx
     import mlx.nn as nn
 
-    logits = model(input_ids)          # (B, T, V)
+    logits = model(input_ids).astype(mx.float32)  # (B, T, V) - ensure float32
     # Shift: predict token t+1 from position t
     shift_logits = logits[:, :-1, :]   # (B, T-1, V)
     shift_labels = input_ids[:, 1:]    # (B, T-1)
@@ -273,9 +304,10 @@ def dpo_loss(
         ref_model, batch["rejected_ids"], batch["rejected_mask"]
     ))
 
-    rewards = beta * (
-        (log_pi_chosen - log_ref_chosen) - (log_pi_rejected - log_ref_rejected)
-    )
+    log_ratio = (log_pi_chosen - log_ref_chosen) - (log_pi_rejected - log_ref_rejected)
+    # Clamp log-ratio to prevent NaN from overflow at low precision (4-bit models)
+    log_ratio = mx.clip(log_ratio, -10.0, 10.0)
+    rewards = beta * log_ratio
     loss = -nn.log_sigmoid(rewards).mean()
     return loss
 
@@ -292,8 +324,12 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     from mlx_lm.tuner.lora import LoRALinear
     from mlx_lm.tuner.utils import linear_to_lora_layers
 
-    DPO_ADAPTER.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    dpo_adapter = get_dpo_adapter_path()
+    log_file = get_log_file()
+    sft_adapter = get_sft_adapter_path()
+
+    dpo_adapter.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Write adapter config so downstream scripts can detect this adapter
     adapter_config = {
@@ -304,27 +340,46 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
         "training": "dpo",
         "beta": args.beta,
     }
-    with open(DPO_ADAPTER / "adapter_config.json", "w") as f:
+    with open(dpo_adapter / "adapter_config.json", "w") as f:
         json.dump(adapter_config, f, indent=2)
 
     print(f"\nLoading model from {model_path} ...")
     policy_model, tokenizer = load(str(model_path))
 
-    # Load SFT adapter weights if available
-    sft_adapter_config = SFT_ADAPTER / "adapter_config.json"
-    if sft_adapter_config.exists():
-        print(f"Loading SFT adapter from {SFT_ADAPTER} ...")
-        policy_model.load_weights(str(SFT_ADAPTER / "adapters.safetensors"), strict=False)
+    # Read SFT adapter config to match LoRA settings
+    sft_adapter_config_file = sft_adapter / "adapter_config.json"
+    sft_has_adapter = sft_adapter_config_file.exists() or (sft_adapter / "adapters.safetensors").exists()
 
-    # Apply LoRA to policy model
-    linear_to_lora_layers(policy_model, args.lora_layers, {"rank": args.lora_rank, "scale": 1.0, "dropout": 0.0})
+    # Determine LoRA config from SFT adapter if available
+    sft_num_layers = args.lora_layers
+    sft_lora_rank = args.lora_rank
+    sft_lora_scale = 1.0
+    if sft_adapter_config_file.exists():
+        with open(sft_adapter_config_file) as f:
+            sft_cfg = json.load(f)
+        # mlx_lm style config
+        if "lora_parameters" in sft_cfg:
+            sft_lora_rank = sft_cfg["lora_parameters"].get("rank", args.lora_rank)
+            sft_lora_scale = sft_cfg["lora_parameters"].get("scale", 1.0)
+        if "num_layers" in sft_cfg:
+            sft_num_layers = sft_cfg["num_layers"]
+        print(f"SFT adapter config: rank={sft_lora_rank}, layers={sft_num_layers}, scale={sft_lora_scale}")
+
+    # Apply LoRA FIRST, then load SFT weights (LoRA keys must exist before loading)
+    linear_to_lora_layers(policy_model, sft_num_layers, {"rank": sft_lora_rank, "scale": sft_lora_scale, "dropout": 0.0})
+
+    if sft_has_adapter:
+        print(f"Loading SFT adapter from {sft_adapter} ...")
+        policy_model.load_weights(str(sft_adapter / "adapters.safetensors"), strict=False)
+
     policy_model.train()
 
-    # Reference model is a frozen copy (base + SFT adapter, no new LoRA)
+    # Reference model is a frozen copy (base + SFT adapter)
     print("Loading reference model ...")
     ref_model, _ = load(str(model_path))
-    if sft_adapter_config.exists():
-        ref_model.load_weights(str(SFT_ADAPTER / "adapters.safetensors"), strict=False)
+    linear_to_lora_layers(ref_model, sft_num_layers, {"rank": sft_lora_rank, "scale": sft_lora_scale, "dropout": 0.0})
+    if sft_has_adapter:
+        ref_model.load_weights(str(sft_adapter / "adapters.safetensors"), strict=False)
     ref_model.eval()
     # Freeze all ref model params
     ref_model.freeze()
@@ -342,7 +397,7 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     best_loss = float("inf")
     start = time.time()
 
-    with open(LOG_FILE, "w") as log:
+    with open(log_file, "w") as log:
         log.write(f"DPO Training — {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         log.write(f"beta={args.beta}, lr={args.learning_rate}, iters={args.iters}\n\n")
 
@@ -360,11 +415,21 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
                 batch = next(data_iter)
 
             loss, grads = loss_and_grad(policy_model, batch)
+            # Gradient clipping to prevent NaN with large models
+            grads, _ = optim.clip_grad_norm(grads, max_norm=1.0)
             optimizer.update(policy_model, grads)
             mx.eval(policy_model.parameters(), optimizer.state, loss)
 
             loss_val = loss.item()
             step += 1
+
+            # NaN detection — abort early instead of wasting compute
+            import math
+            if math.isnan(loss_val) or math.isinf(loss_val):
+                msg = f"ERROR: NaN/Inf loss detected at step {step}. Aborting."
+                print(msg)
+                log.write(msg + "\n")
+                sys.exit(1)
 
             if step % args.log_every == 0:
                 elapsed = time.time() - start
@@ -374,15 +439,15 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
                 log.flush()
 
             if step % args.save_every == 0 or step == args.iters:
-                save_lora_weights(policy_model, str(DPO_ADAPTER / "adapters.safetensors"))
+                save_lora_weights(policy_model, str(dpo_adapter / "adapters.safetensors"))
                 print(f"  Saved adapter checkpoint at step {step}")
                 if loss_val < best_loss:
                     best_loss = loss_val
-                    save_lora_weights(policy_model, str(DPO_ADAPTER / "adapters_best.safetensors"))
+                    save_lora_weights(policy_model, str(dpo_adapter / "adapters_best.safetensors"))
 
     total = time.time() - start
     print(f"\nDPO training complete in {total:.1f}s")
-    print(f"Final adapter saved to: {DPO_ADAPTER}")
+    print(f"Final adapter saved to: {dpo_adapter}")
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +455,17 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global _CLI_MODEL_PATH, _CLI_SFT_ADAPTER, _CLI_OUTPUT_DIR, _CLI_LOG_FILE
+
     parser = argparse.ArgumentParser(description="DPO training via MLX")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Path to base model directory (default: models/qwen25-3b-mlx)")
+    parser.add_argument("--adapter-path", type=str, default=None,
+                        help="Path to SFT adapter to start from (default: outputs/sft/adapters)")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Path to save DPO adapters (default: outputs/dpo/adapters)")
+    parser.add_argument("--data", type=str, default=None,
+                        help="Path to DPO data JSONL (default: data/processed/train/dpo.jsonl)")
     parser.add_argument("--iters", type=int, default=DEFAULTS["iters"])
     parser.add_argument("--batch-size", type=int, default=DEFAULTS["batch_size"])
     parser.add_argument("--lora-layers", type=int, default=DEFAULTS["lora_layers"])
@@ -404,6 +479,18 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate setup without running training")
     args = parser.parse_args()
+
+    # Set CLI overrides
+    if args.model:
+        _CLI_MODEL_PATH = args.model
+    if args.adapter_path:
+        _CLI_SFT_ADAPTER = args.adapter_path
+    if args.output_dir:
+        _CLI_OUTPUT_DIR = args.output_dir
+        _CLI_LOG_FILE = str(Path(args.output_dir).parent / "train.log")
+    if args.data:
+        global DPO_DATA
+        DPO_DATA = Path(args.data)
 
     check_dependencies()
     model_path = resolve_model_path()

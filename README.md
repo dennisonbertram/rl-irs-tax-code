@@ -168,10 +168,18 @@ ollama run irs-tax-qwen
 
 ## HuggingFace Models
 
-Trained adapters are published on HuggingFace:
+Trained adapters and GGUF exports are published on HuggingFace:
 
-- SFT adapters: [dennisonbertram/qwen2.5-3b-irs-sft](https://huggingface.co/dennisonbertram/qwen2.5-3b-irs-sft)
-- GGUF (Ollama-ready): [dennisonbertram/qwen2.5-3b-irs-tax-gguf](https://huggingface.co/dennisonbertram/qwen2.5-3b-irs-tax-gguf)
+- GGUF v1 (Ollama-ready): [dennisonb/qwen25-tax-3b-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-GGUF)
+- Adapters v1: [dennisonb/qwen25-tax-3b-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-adapters)
+
+### Model Versions
+
+| Version | GGUF | Adapters | Status |
+|---------|------|----------|--------|
+| v1 | [dennisonb/qwen25-tax-3b-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-GGUF) | [dennisonb/qwen25-tax-3b-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-adapters) | Published |
+| v2 | [dennisonb/qwen25-tax-3b-v2-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-v2-GGUF) | [dennisonb/qwen25-tax-3b-v2-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-v2-adapters) | Uploading |
+| v3 | [dennisonb/qwen25-tax-3b-v3-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-v3-GGUF) | [dennisonb/qwen25-tax-3b-v3-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-v3-adapters) | Uploading |
 
 ---
 
