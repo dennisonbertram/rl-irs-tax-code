@@ -1,10 +1,45 @@
-# IRS Tax Code RL Training
+<p align="center">
+  <img src="docs/assets/header.png" alt="Abstract watercolor in warm earth tones blending into soft blues" width="100%" />
+</p>
+
+# A Tax Code Tutor That Lives on Your Laptop
+
+This project teaches a small AI model to read and understand the United States tax code — and runs it entirely on a personal computer, with no cloud, no subscription, and no data leaving the machine.
+
+## What we're doing, in plain language
+
+The U.S. tax code is enormous. The actual law (Title 26) plus the rules the Treasury writes to interpret it (26 CFR) run to thousands of pages of dense legal language. Most people — including most accountants — never read it directly. They read summaries of summaries.
+
+We took a small, freely available AI model and **patiently taught it the source material itself**. Not blog posts about taxes. Not TurboTax help articles. The actual statutes and regulations, section by section.
+
+The training happens in three rounds, each one sharpening a different skill:
+
+1. **Reading** — we show the model the tax code and ask it to explain sections in its own words, then correct it when it's wrong.
+2. **Judgment** — we show it pairs of answers (one good, one sloppy) and teach it to prefer the precise one.
+3. **Citation** — we reward it for pointing back to the exact section of law it's relying on, the way a careful lawyer would.
+
+The result is a model you can ask questions like *"what's the standard deduction for a single filer in 2024?"* or *"which IRC section governs §401(k) hardship withdrawals?"* — and it answers locally, on your machine, while citing its sources.
+
+## Why this is interesting
+
+- **Privacy.** Your tax questions never touch a server. The model runs offline.
+- **Verifiability.** Because it cites IRC sections, you can check its work against the real law.
+- **Small and fast.** It's a 3-billion-parameter model — small enough to fit on a laptop, fast enough to answer in seconds.
+- **Reproducible.** Every step, from raw XML of the tax code to the final downloadable model, is in this repository.
+
+## What it isn't
+
+- **Not legal or tax advice.** It's a research project. Verify anything important against the real IRC and a qualified professional.
+- **Not GPT-4.** A 3B model has limits. It's trained to be accurate about *citations* and *specific provisions*, not to do open-ended tax planning.
+- **Not always current.** Tax law changes; the model knows what the source documents said on the date we trained it.
+
+---
+
+# Technical Details
 
 Fine-tuning **Qwen 2.5 3B Instruct** on the IRS Tax Code (IRC Title 26 + 26 CFR Treasury Regulations) using a three-stage pipeline: **SFT → DPO → GRPO** — entirely on Apple Silicon with MLX.
 
 The resulting model is exported to GGUF and served locally via [Ollama](https://ollama.com).
-
----
 
 ## Training Pipeline
 
@@ -48,8 +83,6 @@ IRC Title 26 XML          26 CFR XML
 - Rule-based reward signals: IRC section citation accuracy, answer completeness
 - Reinforces factual grounding without a separate reward model
 
----
-
 ## Hardware Requirements
 
 | Component | Minimum | Tested On |
@@ -61,119 +94,63 @@ IRC Title 26 XML          26 CFR XML
 
 The pipeline is designed for **MLX on Apple Silicon**. It does not use CUDA or MPS via PyTorch — training runs natively via `mlx_lm`.
 
----
-
 ## Setup
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/dennisonbertram/rl-irs-tax-code.git
 cd rl-irs-tax-code
-
-# 2. Create a Python virtual environment (Python 3.11+ recommended)
 python3 -m venv .venv
 source .venv/bin/activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
 pip install mlx-lm          # Apple Silicon only
-
-# 4. Install Ollama (for local inference)
 brew install ollama
 ```
-
----
 
 ## Data Pipeline
 
 The raw IRC and CFR XML files are **not included** in this repo (too large). Regenerate them:
 
 ```bash
-# Download raw XML source data
 bash scripts/download_data.sh
-
-# Parse XML into section-level JSONL
 python scripts/parse_irc.py
 python scripts/parse_cfr.py
-
-# Generate training datasets
 python scripts/generate_training_data.py
-
-# Split into train/eval sets
 python scripts/split_data.py
 ```
 
-This produces:
+Produces:
 - `data/processed/sft_train.jsonl` (~52 MB) — instruction/response pairs
 - `data/processed/dpo_train.jsonl` (~17 MB) — preference pairs
 - `data/processed/grpo_train.jsonl` (~3 MB) — GRPO prompts
 - `data/processed/train/` — train/valid splits for mlx_lm
 
----
-
 ## Training
 
-### Download Base Model
-
 ```bash
-# HuggingFace weights (mlx_lm will auto-convert on first run)
+# Download base model
 huggingface-cli download Qwen/Qwen2.5-3B-Instruct --local-dir models/qwen2.5-3b-instruct
-```
 
-### Stage 1: SFT
-
-```bash
+# Stage 1: SFT
 python scripts/train_sft.py --iters 1000 --batch-size 4
-# or via shell wrapper:
-bash scripts/run_sft.sh
-```
 
-Adapters saved to `outputs/sft/adapters/`.
-
-### Stage 2: DPO
-
-```bash
+# Stage 2: DPO
 python scripts/train_dpo.py
-```
 
-Adapters saved to `outputs/dpo/adapters/`.
-
-### Stage 3: GRPO
-
-```bash
+# Stage 3: GRPO
 python scripts/train_grpo.py
-```
 
-Adapters saved to `outputs/grpo/adapters/`.
-
-### Evaluation
-
-```bash
+# Evaluate
 python scripts/evaluate.py
 ```
-
----
 
 ## Export to Ollama
 
 ```bash
-# Fuse adapters, convert to GGUF Q4_K_M, and import into Ollama
 python scripts/export_to_ollama.py
-
-# Run the model locally
 ollama run irs-tax-qwen
 ```
 
----
-
 ## HuggingFace Models
-
-Trained adapters and GGUF exports are published on HuggingFace:
-
-- GGUF v1 (Ollama-ready): [dennisonb/qwen25-tax-3b-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-GGUF)
-- Adapters v1: [dennisonb/qwen25-tax-3b-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-adapters)
-
-### Model Versions
 
 | Version | GGUF | Adapters | Status |
 |---------|------|----------|--------|
@@ -181,56 +158,30 @@ Trained adapters and GGUF exports are published on HuggingFace:
 | v2 | [dennisonb/qwen25-tax-3b-v2-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-v2-GGUF) | [dennisonb/qwen25-tax-3b-v2-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-v2-adapters) | Uploading |
 | v3 | [dennisonb/qwen25-tax-3b-v3-GGUF](https://huggingface.co/dennisonb/qwen25-tax-3b-v3-GGUF) | [dennisonb/qwen25-tax-3b-v3-adapters](https://huggingface.co/dennisonb/qwen25-tax-3b-v3-adapters) | Uploading |
 
----
-
 ## Project Structure
 
 ```
 rl-irs-tax-code/
-├── configs/
-│   ├── sft_config.yaml         # MLX LoRA hyperparameters
-│   ├── dpo_config.yaml         # DPO training config
-│   └── grpo_config.yaml        # GRPO training config
-├── scripts/
-│   ├── parse_irc.py            # Parse IRC Title 26 XML
-│   ├── parse_cfr.py            # Parse 26 CFR XML
-│   ├── generate_training_data.py  # Build SFT/DPO/GRPO datasets
-│   ├── split_data.py           # Train/eval split
-│   ├── train_sft.py            # Stage 1 training (mlx_lm LoRA)
-│   ├── train_dpo.py            # Stage 2 training (DPO via TRL)
-│   ├── train_grpo.py           # Stage 3 training (GRPO via TRL)
-│   ├── grpo_reward.py          # Reward functions for GRPO
-│   ├── evaluate.py             # Evaluation harness
-│   ├── export_to_ollama.py     # Fuse → GGUF → Ollama import
-│   ├── setup.sh                # Environment setup helper
-│   └── run_sft.sh              # SFT shell wrapper
+├── configs/                    # Training hyperparameters
+├── scripts/                    # Parse, train, evaluate, export
 ├── docs/
+│   ├── assets/                 # README header art
 │   ├── context/                # Background research
-│   ├── investigations/         # Exploration notes
-│   └── plans/                  # Execution plans
-├── data/                       # Generated (not committed — see Data Pipeline)
-│   ├── raw/                    # Downloaded XML source files
-│   └── processed/              # Parsed JSONL datasets
-├── models/                     # Downloaded model weights (not committed)
-├── outputs/                    # Training checkpoints (not committed)
+│   └── investigations/         # Pipeline reviews + debug notes
+├── data/                       # Generated, not committed
+├── models/                     # Downloaded base weights, not committed
+├── outputs/                    # Training adapters, not committed
 ├── requirements.txt
-├── CLAUDE.md
 └── README.md
 ```
 
----
-
 ## Limitations
 
-- **Apple Silicon only** — the MLX training path does not run on Linux/Windows or CUDA GPUs without modification. For CUDA, swap `mlx_lm` for `trl` with `SFTTrainer` on a standard GPU.
-- **3B parameter model** — the model is small and will not match GPT-4-level tax analysis. It is trained to cite IRC sections accurately, not to give legal advice.
-- **Not legal advice** — outputs should be verified against the official IRC and CFR before relying on them for any tax or legal purpose.
-- **Data freshness** — the IRC and CFR XMLs used for training reflect a specific publication date. Tax law changes frequently.
-
----
+- **Apple Silicon only** — MLX training does not run on CUDA without rewriting to `trl` + `SFTTrainer`.
+- **3B parameters** — small model; trained for citation accuracy, not open-ended tax analysis.
+- **Not legal advice** — verify outputs against the official IRC and CFR before relying on them.
+- **Data freshness** — reflects a specific publication date; tax law changes frequently.
 
 ## License
 
-The training code in this repository is licensed under the **Apache 2.0 License**, matching the license of the base model (Qwen 2.5).
-
-The IRS tax code text (IRC Title 26, 26 CFR) is a U.S. government work and is in the public domain.
+Training code: **Apache 2.0** (matching Qwen 2.5). The IRS tax code text is U.S. government public domain.
