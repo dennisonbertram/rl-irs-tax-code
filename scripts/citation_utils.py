@@ -49,7 +49,9 @@ _SECTION_KEYWORD = r"""
 """
 
 _SECTION_SIGN = r"""
-    §\s*                                        # bare §N or § N
+    (?<!C\.F\.R\.\s)(?<!C\.F\.R\.)             # Fix 1-I (review item 1-I LOW): negative
+    (?<!CFR\s)(?<!CFR)                          # lookbehind so that CFR/C.F.R. section
+    §\s*                                        # signs are NOT counted as IRC citations
 """
 
 IRC_CITATION_PATTERN = re.compile(

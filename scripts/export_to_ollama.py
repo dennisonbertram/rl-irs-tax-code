@@ -41,8 +41,10 @@ ADAPTER_CANDIDATES = [
 ]
 
 FUSED_PATH = PROJECT_ROOT / "outputs" / "final" / "fused"
-GGUF_PATH = PROJECT_ROOT / "outputs" / "final" / "model-q8.gguf"   # q8_0 intermediate (bf16 too large on constrained disks)
-GGUF_Q4_PATH = PROJECT_ROOT / "outputs" / "final" / "model-q4_k_m.gguf"
+# [6-A] Two-step quantization: bf16 GGUF first, then q6_k (q8_0 cannot be re-quantized by llama-quantize)
+GGUF_PATH = PROJECT_ROOT / "outputs" / "final" / "model-bf16.gguf"
+GGUF_Q6_PATH = PROJECT_ROOT / "outputs" / "final" / "model-q6_k.gguf"
+GGUF_Q4_PATH = PROJECT_ROOT / "outputs" / "final" / "model-q4_k_m.gguf"  # legacy fallback
 MODELFILE_PATH = PROJECT_ROOT / "outputs" / "final" / "Modelfile"
 OLLAMA_MODEL_NAME = "qwen25-tax-3b"
 
@@ -187,11 +189,13 @@ def convert_to_gguf(fused_path: Path, dry_run: bool) -> Path:
         env = {**os.environ, "PYTHONPATH": str(gguf_py) + ":" + os.environ.get("PYTHONPATH", "")}
         print(f"Using bundled gguf-py from: {gguf_py}")
 
+    # [6-A] Export as bf16 first; q6_k quantization happens in a separate step
+    # (q8_0 cannot be re-quantized by llama-quantize in brew llama.cpp)
     cmd = [
         sys.executable, str(converter),
         str(fused_path),
         "--outfile", str(GGUF_PATH),
-        "--outtype", "q8_0",   # q8_0 is ~half the size of bf16; llama-quantize cannot re-quantize from q8_0 in brew llama.cpp
+        "--outtype", "bf16",
     ]
     print(" ".join(cmd))
     if not dry_run:
@@ -199,45 +203,37 @@ def convert_to_gguf(fused_path: Path, dry_run: bool) -> Path:
         if result.returncode != 0:
             print("ERROR: GGUF conversion failed. Check llama.cpp version compatibility.")
             sys.exit(1)
-        print(f"GGUF file saved to: {GGUF_PATH}")
+        print(f"bf16 GGUF saved to: {GGUF_PATH}")
     return GGUF_PATH
 
 
 def quantize_gguf(gguf_path: Path, dry_run: bool) -> Path:
-    """Quantize the GGUF to Q4_K_M for efficient Ollama serving.
+    """Quantize the bf16 GGUF to q6_k for Ollama serving.
 
-    NOTE: llama-quantize (brew llama.cpp) cannot re-quantize from q8_0 input.
-    Since GGUF_PATH is now q8_0, this step is skipped and the q8_0 is used
-    directly with Ollama. The q8_0 model is ~3.3 GB vs ~2.0 GB for Q4_K_M,
-    but has slightly better quality.
+    [6-A] Two-step process: bf16 GGUF → q6_k via llama-quantize.
+    q6_k preserves numeric precision (e.g. $14,600 standard deduction) that
+    q4_k_m loses, while remaining ~half the size of bf16.
     """
-    print("\nStep 3: Quantizing to Q4_K_M")
-
-    # If the input is already q8_0 (our default), llama-quantize cannot
-    # re-quantize it. Skip quietly and use q8_0 as the Ollama model.
-    if gguf_path == GGUF_PATH and "q8" in gguf_path.name:
-        print("INFO: Input GGUF is q8_0 — brew llama-quantize cannot re-quantize from q8_0.")
-        print("      Using q8_0 directly with Ollama (3.3 GB vs 2.0 GB for Q4_K_M).")
-        return gguf_path
+    print("\nStep 3: Quantizing to q6_k")
 
     quantize_bin = shutil.which("llama-quantize")
     if quantize_bin is None:
         print(
             "WARNING: llama-quantize not found.\n"
             "Install with: brew install llama.cpp\n"
-            "Skipping quantization — Ollama will use the q8_0 GGUF (larger file)."
+            "Skipping quantization — Ollama will use the bf16 GGUF (larger file)."
         )
-        return gguf_path  # fall back to unquantized
+        return gguf_path  # fall back to bf16
 
-    cmd = [quantize_bin, str(gguf_path), str(GGUF_Q4_PATH), "Q4_K_M"]
+    cmd = [quantize_bin, str(gguf_path), str(GGUF_Q6_PATH), "q6_k"]
     print(" ".join(cmd))
     if not dry_run:
         result = subprocess.run(cmd, check=False)
         if result.returncode != 0:
-            print("ERROR: Quantization failed. Using unquantized GGUF.")
+            print("ERROR: q6_k quantization failed. Using bf16 GGUF.")
             return gguf_path
-        print(f"Quantized GGUF saved to: {GGUF_Q4_PATH}")
-    return GGUF_Q4_PATH
+        print(f"q6_k GGUF saved to: {GGUF_Q6_PATH}")
+    return GGUF_Q6_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +245,7 @@ def write_modelfile(gguf_path: Path, dry_run: bool) -> Path:
     print("\nStep 4: Writing Modelfile")
     MODELFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+    # [6-B] Include all Qwen chat template stop sequences to avoid streaming until EOS
     content = f"""\
 FROM {gguf_path}
 
@@ -261,6 +258,7 @@ PARAMETER repeat_penalty 1.1
 PARAMETER num_ctx 4096
 PARAMETER stop "<|endoftext|>"
 PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"
 """
     print(f"Modelfile path: {MODELFILE_PATH}")
     if not dry_run:
@@ -347,7 +345,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-quantize",
         action="store_true",
-        help="Skip Q4_K_M quantization",
+        help="Skip q6_k quantization (use bf16 GGUF directly)",
     )
     parser.add_argument(
         "--output-dir",
@@ -362,7 +360,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    global FUSED_PATH, GGUF_PATH, GGUF_Q4_PATH, MODELFILE_PATH
+    # [6-A] GGUF_Q6_PATH added to globals for two-step bf16 -> q6_k pipeline
+    global FUSED_PATH, GGUF_PATH, GGUF_Q6_PATH, GGUF_Q4_PATH, MODELFILE_PATH
 
     model_name = args.model_name
 
@@ -370,8 +369,9 @@ def main() -> None:
     if args.output_dir:
         out = Path(args.output_dir)
         FUSED_PATH = out / "fused"
-        GGUF_PATH = out / "model-q8.gguf"
-        GGUF_Q4_PATH = out / "model-q4_k_m.gguf"
+        GGUF_PATH = out / "model-bf16.gguf"
+        GGUF_Q6_PATH = out / "model-q6_k.gguf"
+        GGUF_Q4_PATH = out / "model-q4_k_m.gguf"  # legacy fallback
         MODELFILE_PATH = out / "Modelfile"
 
     base_model = resolve_base_model(args.model)
@@ -382,7 +382,7 @@ def main() -> None:
     print(f"  base model:    {base_model}")
     print(f"  adapter:       {adapter_path or 'none'}")
     print(f"  fused output:  {FUSED_PATH}")
-    print(f"  gguf output:   {GGUF_Q4_PATH}")
+    print(f"  gguf output:   {GGUF_Q6_PATH}")
     print(f"  ollama name:   {model_name}")
     print("=" * 70 + "\n")
 

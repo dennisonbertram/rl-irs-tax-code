@@ -25,3 +25,14 @@ __pycache__/
 # Temp
 /tmp/
 *.log
+
+# Disposable training outputs
+outputs/*/adapters_*_backup/
+outputs/*/adapters_pre_smoke*/
+outputs/v1_backup/
+outputs/32b/
+outputs/evaluation/
+
+# Regenerable batch/eval data
+data/batch/
+data/eval/

@@ -37,7 +37,7 @@ MODEL_HF = PROJECT_ROOT / "models" / "qwen2.5-3b-instruct"
 SFT_ADAPTER = PROJECT_ROOT / "outputs" / "sft" / "adapters"
 DPO_ADAPTER = PROJECT_ROOT / "outputs" / "dpo" / "adapters"
 GRPO_ADAPTER = PROJECT_ROOT / "outputs" / "grpo" / "adapters"
-GRPO_DATA = PROJECT_ROOT / "data" / "processed" / "train" / "grpo.jsonl"
+GRPO_DATA = PROJECT_ROOT / "data" / "v5" / "grpo_train.jsonl"
 SFT_DATA = PROJECT_ROOT / "data" / "train_v2" / "sft.jsonl"
 LOG_FILE = PROJECT_ROOT / "outputs" / "grpo" / "train.log"
 
@@ -53,7 +53,7 @@ _CLI_SFT_DATA = None
 # ---------------------------------------------------------------------------
 DEFAULTS = {
     "iters": 300,
-    "group_size": 4,           # K completions per prompt
+    "group_size": 8,           # K completions per prompt; use 4 if OOM (fix 2-D: 8 gives better sample efficiency on 3B vs 4)
     "batch_size": 1,           # prompts per gradient step
     "learning_rate": 1e-6,
     "lora_layers": 16,
@@ -72,15 +72,62 @@ DEFAULTS = {
 # Dependency and path checks
 # ---------------------------------------------------------------------------
 
+def _get_model_items(model) -> list:
+    """
+    Return a flat list of (key, value) pairs from a model's parameters.
+
+    Handles multiple MLX API variants defensively:
+    - Modern MLX: tree_flatten(params) returns list[(str, array)]  (current)
+    - Future/alternate: may be renamed to tree_flatten_items
+    - Hypothetical legacy: might return tuple(leaves, treedef) — we guard
+      against this even though it has not been observed in any released MLX
+      version, to satisfy belt-and-suspenders defensive coding.
+    """
+    import mlx.utils as mu
+    fn = getattr(mu, "tree_flatten_items", None) or getattr(mu, "tree_flatten")
+    result = fn(model.parameters())
+
+    # If result is a bare 2-tuple (leaves, treedef) rather than a list of
+    # (k,v) pairs, extract just the leaves list.  This guard handles any
+    # hypothetical MLX version that changed the return convention.
+    if (
+        isinstance(result, tuple)
+        and len(result) == 2
+        and isinstance(result[1], type)  # treedef is a type/class in JAX convention
+    ):
+        result = result[0]
+
+    # Validate that we have a sequence of 2-tuples
+    if not isinstance(result, (list, tuple)):
+        raise RuntimeError(
+            f"_get_model_items: unexpected return type {type(result).__name__} "
+            "from tree_flatten. Check MLX version compatibility."
+        )
+    if result and not isinstance(result[0], (list, tuple)):
+        raise RuntimeError(
+            f"_get_model_items: expected (key, value) pairs but got "
+            f"{type(result[0]).__name__}. Check MLX version compatibility."
+        )
+    return list(result)
+
+
 def save_lora_weights(model, path: str) -> None:
-    """Save only LoRA adapter weights, not the full model."""
+    """Save only LoRA adapter weights, not the full model.
+
+    Raises RuntimeError if no LoRA parameters are found, to avoid silently
+    saving the full model (6+ GB) when checkpointing was intended to save
+    a small adapter (< 50 MB).
+    """
     import mlx.core as mx
-    from mlx.utils import tree_flatten
-    all_params = tree_flatten(model.parameters())
-    lora_params = {k: v for k, v in all_params if "lora" in k}
+    all_params = _get_model_items(model)
+    lora_params = {k: v for k, v in all_params if "lora" in k.lower()}
     if not lora_params:
-        print("WARNING: No LoRA parameters found, saving all trainable params")
-        lora_params = dict(tree_flatten(model.trainable_parameters()))
+        # Fail hard rather than silently saving 6 GB of full model weights.
+        raise RuntimeError(
+            "save_lora_weights: no LoRA parameters found in model. "
+            "Ensure linear_to_lora_layers() has been called before saving. "
+            f"Available parameter keys: {[k for k, _ in all_params[:10]]!r}"
+        )
     mx.save_safetensors(path, lora_params)
 
 
@@ -152,6 +199,18 @@ def resolve_start_adapter() -> Path | None:
     return None
 
 
+def extract_prompt(rec: dict) -> str | None:
+    """Extract prompt string from a record (supports 'prompt' key or 'messages' format)."""
+    if "prompt" in rec:
+        return rec["prompt"]
+    if "messages" in rec:
+        # Extract user message content as prompt
+        msgs = rec["messages"]
+        user_msg = next((m["content"] for m in msgs if m["role"] == "user"), None)
+        return user_msg
+    return None
+
+
 def check_data() -> None:
     if not GRPO_DATA.exists():
         print(f"ERROR: GRPO data not found at {GRPO_DATA}")
@@ -159,8 +218,9 @@ def check_data() -> None:
         sys.exit(1)
     with open(GRPO_DATA) as f:
         first = json.loads(f.readline())
-    if "prompt" not in first:
-        print(f"ERROR: grpo.jsonl records must have a 'prompt' key. Got: {list(first.keys())}")
+    prompt = extract_prompt(first)
+    if prompt is None:
+        print(f"ERROR: grpo.jsonl records must have a 'prompt' key or 'messages' list. Got: {list(first.keys())}")
         sys.exit(1)
     print(f"GRPO data OK: {GRPO_DATA}")
 
@@ -214,6 +274,7 @@ def load_prompts(path: Path, reference_lookup: dict[str, str] | None = None) -> 
     """
     Load GRPO data as list of dicts with 'prompt', optional 'expected_section',
     and optional 'reference' answer (populated from reference_lookup if provided).
+    Supports both 'prompt' key and 'messages' format.
     """
     if reference_lookup is None:
         reference_lookup = {}
@@ -224,7 +285,9 @@ def load_prompts(path: Path, reference_lookup: dict[str, str] | None = None) -> 
             line = line.strip()
             if line:
                 rec = json.loads(line)
-                prompt = rec["prompt"]
+                prompt = extract_prompt(rec)
+                if prompt is None:
+                    continue
                 reference = reference_lookup.get(prompt, None)
                 if reference:
                     matched += 1
@@ -284,8 +347,13 @@ def generate_completions(
 
 def sequence_log_prob(model, tokenizer, text: str, max_seq_length: int):
     """
-    Compute the sum of per-token log-probs for a sequence.
+    Compute the mean per-token log-prob for a sequence.
     Returns a scalar mlx array.
+
+    Fix 1-A: Use MEAN (not sum) over tokens. Summing causes importance ratio
+    rho = exp(log_pi - log_ref) to scale with sequence length, making PPO clip
+    fire constantly on long completions and destroying the learning signal.
+    Length-normalised (average) log-probs keep rho in a bounded range.
     """
     import mlx.core as mx
     import mlx.nn as nn
@@ -298,10 +366,19 @@ def sequence_log_prob(model, tokenizer, text: str, max_seq_length: int):
     shift_logits = logits[:, :-1, :]    # (1, T-1, V)
     shift_labels = ids_arr[:, 1:]       # (1, T-1)
 
+    # Build a real-token mask (all 1s — no padding in a single sequence)
+    # Note: mx.ones_like() does not accept dtype kwarg in this MLX version;
+    # use mx.ones(shape, dtype=...) instead.
+    mask = mx.ones(shift_labels.shape, dtype=mx.float32)  # (1, T-1)
+
     log_probs = nn.log_softmax(shift_logits, axis=-1)
     T = shift_labels.shape[1]
-    token_lp = log_probs[0, mx.arange(T), shift_labels[0]]  # (T-1,)
-    return token_lp.sum()
+    token_log_probs = log_probs[0, mx.arange(T), shift_labels[0]]  # (T-1,)
+
+    # Fix 1-A: length-normalise so that rho does not explode with long completions
+    token_sum = (token_log_probs * mask[0]).sum(axis=-1)
+    token_cnt = mx.clip(mask[0].sum(axis=-1), 1.0, None)
+    return token_sum / token_cnt
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +410,11 @@ def grpo_loss_for_prompt(
     total_loss = mx.array(0.0)
 
     for completion, adv in zip(completions, advantages):
-        full_text = prompt + completion
+        # Fix 1-E: insert separator between prompt and completion so the model
+        # can distinguish where the prompt ends and the assistant turn begins.
+        # Using eos_token as delimiter; falls back to "\n\n" if not available.
+        separator = getattr(tokenizer, "eos_token", None) or "\n\n"
+        full_text = prompt + separator + completion
         max_len = args.max_new_tokens + 128  # rough bound
 
         log_pi = sequence_log_prob(policy_model, tokenizer, full_text, max_len)
@@ -382,16 +463,67 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     policy_model, tokenizer = load(str(model_path))
 
     start_adapter = resolve_start_adapter()
+
+    # Fix 1-B: read LoRA scale/rank/num_layers from the prior adapter's config
+    # so we don't silently shrink SFT/DPO deltas by hardcoding scale=1.0.
+    # The SFT adapter is trained with scale=20.0; using 1.0 would wipe out all
+    # inherited knowledge before the first GRPO update.
+    lora_scale = 20.0   # safe default matching mlx_lm rank-32 SFT default
+    lora_rank = args.lora_rank
+    lora_num_layers = args.lora_layers
     if start_adapter is not None:
+        adapter_config_path = start_adapter / "adapter_config.json"
+        if adapter_config_path.exists():
+            with open(adapter_config_path) as f:
+                adapter_cfg = json.load(f)
+            # mlx_lm stores these under "lora_parameters" sub-key
+            lora_params_cfg = adapter_cfg.get("lora_parameters", {})
+            lora_scale = lora_params_cfg.get("scale", adapter_cfg.get("scale", lora_scale))
+            lora_rank = lora_params_cfg.get("rank", adapter_cfg.get("lora_rank", lora_rank))
+            lora_num_layers = adapter_cfg.get("num_layers", adapter_cfg.get("lora_layers", lora_num_layers))
+            print(f"Adapter config: scale={lora_scale}, rank={lora_rank}, num_layers={lora_num_layers}")
+
+    # Fix 2-B: use dropout=0.05 to match SFT stage; changing dropout between
+    # stages alters the effective scale of new delta updates.
+    lora_config = {"rank": lora_rank, "scale": lora_scale, "dropout": 0.05}
+
+    def _apply_lora_if_needed(mdl, num_layers, config):
+        """Apply LoRA only if the model does not already contain LoRALinear layers.
+
+        Uses isinstance() on actual sub-modules (via model.modules()) rather
+        than attribute checks on top-level transformer blocks.  LoRA replaces
+        Linear sub-modules nested inside attention/MLP blocks, so attribute-
+        based checks on the outer layer are not reliable.
+        """
+        from mlx_lm.tuner.lora import LoRALinear
+        # Walk all sub-modules; stop as soon as we find one LoRALinear
+        already_lora = any(
+            isinstance(m, LoRALinear)
+            for m in mdl.modules()
+        )
+        if already_lora:
+            print("LoRA layers already present — skipping re-initialisation.")
+            return
+        linear_to_lora_layers(mdl, num_layers, config)
+
+    # Apply LoRA to policy BEFORE loading adapter weights.
+    # linear_to_lora_layers must run first so that LoRA parameter keys
+    # (lora_A, lora_B, etc.) exist in the model before load_weights tries
+    # to populate them. Loading weights before this call silently discards
+    # all LoRA keys because the layers don't exist yet (strict=False).
+    _apply_lora_if_needed(policy_model, lora_num_layers, lora_config)
+
+    if start_adapter is not None:
+        print(f"Initializing policy LoRA from adapter: {start_adapter}")
         policy_model.load_weights(str(start_adapter / "adapters.safetensors"), strict=False)
 
-    # Apply LoRA to policy
-    linear_to_lora_layers(policy_model, args.lora_layers, {"rank": args.lora_rank, "scale": 1.0, "dropout": 0.0})
     policy_model.train()
 
     # Frozen reference model
     print("Loading reference model ...")
     ref_model, _ = load(str(model_path))
+    # Apply LoRA to reference model first, then load adapter weights.
+    _apply_lora_if_needed(ref_model, lora_num_layers, lora_config)
     if start_adapter is not None:
         ref_model.load_weights(str(start_adapter / "adapters.safetensors"), strict=False)
     ref_model.eval()
@@ -410,6 +542,22 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
 
     import numpy as np
     rng = np.random.default_rng(args.seed)
+
+    # Define the loss function that takes per-step data as arguments so that
+    # nn.value_and_grad can be compiled ONCE outside the loop and reused.
+    # Fix MEDIUM: previously loss_fn was a new closure every step, which forced
+    # value_and_grad to JIT-recompile each iteration (~0.3-0.5 s overhead).
+    # Fix CRITICAL (from v2): loss_fn accepts (prompt, completions, rewards) as
+    # explicit args, NOT a model arg — value_and_grad differentiates wrt
+    # policy_model's trainable parameters; model is NOT passed as a call arg.
+    def loss_fn(prompt_arg, completions_arg, rewards_arg):
+        return grpo_loss_for_prompt(
+            policy_model, ref_model, tokenizer,
+            prompt_arg, completions_arg, rewards_arg, args,
+        )
+
+    # Compile value_and_grad once before the loop
+    loss_and_grad = nn.value_and_grad(policy_model, loss_fn)
 
     start_time = time.time()
     best_avg_reward = -float("inf")
@@ -444,14 +592,10 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
                 for c in completions
             ]
 
-            # Compute loss
-            def loss_fn(model):
-                return grpo_loss_for_prompt(
-                    model, ref_model, tokenizer,
-                    prompt, completions, rewards, args,
-                )
-
-            loss, grads = nn.value_and_grad(policy_model, loss_fn)(policy_model)
+            # Compute loss and gradients using the pre-compiled value_and_grad fn
+            loss, grads = loss_and_grad(prompt, completions, rewards)
+            # Gradient clipping to match DPO and prevent NaN on long completions
+            grads, _ = optim.clip_grad_norm(grads, max_norm=1.0)
             optimizer.update(policy_model, grads)
             mx.eval(policy_model.parameters(), optimizer.state, loss)
 
@@ -472,6 +616,24 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
 
             if step % args.save_every == 0 or step == args.iters:
                 save_lora_weights(policy_model, str(grpo_adapter / "adapters.safetensors"))
+                # Fix HIGH: write adapter_config.json at every checkpoint so
+                # downstream scripts (export_to_ollama, evaluate, future RL
+                # stages) read the correct scale/rank/dropout rather than a
+                # stale file from a previous mlx_lm.lora run.
+                grpo_adapter_config = {
+                    "num_layers": lora_num_layers,
+                    "lora_parameters": {
+                        "rank": lora_rank,
+                        "scale": lora_scale,
+                        "dropout": 0.05,
+                    },
+                    "training": "grpo",
+                    "group_size": args.group_size,
+                    "eps_clip": args.epsilon_clip,
+                    "step": step,
+                }
+                with open(grpo_adapter / "adapter_config.json", "w") as _f:
+                    json.dump(grpo_adapter_config, _f, indent=2)
                 print(f"  Saved adapter checkpoint at step {step}")
                 if avg_reward > best_avg_reward:
                     best_avg_reward = avg_reward

@@ -22,9 +22,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 MODEL_MLX = PROJECT_ROOT / "models" / "qwen25-3b-mlx"
 MODEL_HF = PROJECT_ROOT / "models" / "qwen2.5-3b-instruct"
-DATA_DIR = PROJECT_ROOT / "data" / "processed" / "train"
+DATA_DIR = PROJECT_ROOT / "data" / "v5"
 ADAPTER_PATH = PROJECT_ROOT / "outputs" / "sft" / "adapters"
 LOG_FILE = PROJECT_ROOT / "outputs" / "sft" / "train.log"
+
+# CLI override (set in main())
+_CLI_DATA_DIR: Path | None = None
 
 # ---------------------------------------------------------------------------
 # Default hyperparameters (tuned for M4 Max 128 GB, bf16, rank-32 LoRA)
@@ -32,7 +35,10 @@ LOG_FILE = PROJECT_ROOT / "outputs" / "sft" / "train.log"
 DEFAULTS = {
     "iters": 1000,
     "batch_size": 4,
-    "lora_layers": 16,         # number of transformer layers to apply LoRA
+    # Fix 2-A: raised from 16 → 24 (all layers for Qwen-3B) so LoRA covers the
+    # full network. With only 16/24 layers frozen, the model lacks capacity to
+    # memorise precise IRC numeric tables. Use 16 if memory-constrained.
+    "lora_layers": 24,         # number of transformer layers to apply LoRA
     "lora_rank": 32,
     "learning_rate": 1e-5,
     "val_batches": 25,
@@ -66,22 +72,30 @@ def resolve_model_path() -> Path:
     sys.exit(1)
 
 
+def get_data_dir() -> Path:
+    """Return the data directory to use (CLI override or default)."""
+    if _CLI_DATA_DIR is not None:
+        return _CLI_DATA_DIR
+    return DATA_DIR
+
+
 def check_data() -> None:
     """Verify SFT training data exists."""
+    data_dir = get_data_dir()
     required = [
-        DATA_DIR / "train.jsonl",
-        DATA_DIR / "valid.jsonl",
+        data_dir / "train.jsonl",
+        data_dir / "valid.jsonl",
     ]
     # mlx_lm.lora expects train.jsonl and valid.jsonl in the data directory.
     # If the user created sft.jsonl, we check for that too and give a hint.
     missing = [p for p in required if not p.exists()]
     if missing:
         # Check for the raw sft.jsonl as fallback
-        sft_file = DATA_DIR / "sft.jsonl"
+        sft_file = data_dir / "sft.jsonl"
         if sft_file.exists():
             print(
-                f"WARNING: mlx_lm.lora expects {DATA_DIR}/train.jsonl and "
-                f"{DATA_DIR}/valid.jsonl.\n"
+                f"WARNING: mlx_lm.lora expects {data_dir}/train.jsonl and "
+                f"{data_dir}/valid.jsonl.\n"
                 f"Found {sft_file} — run scripts/prepare_mlx_data.py to split it."
             )
         else:
@@ -92,25 +106,65 @@ def check_data() -> None:
             )
         sys.exit(1)
     # Quick sanity-check the first record
-    with open(DATA_DIR / "train.jsonl") as f:
+    with open(data_dir / "train.jsonl") as f:
         first = json.loads(f.readline())
     if "text" not in first and "messages" not in first:
         print(
             "WARNING: train.jsonl records should have a 'text' or 'messages' key. "
             f"Got keys: {list(first.keys())}"
         )
-    print(f"Data OK — {DATA_DIR}")
+    print(f"Data OK — {data_dir}")
+
+
+def build_lora_config(args: argparse.Namespace) -> Path:
+    """
+    Write a temporary YAML config for mlx_lm.lora with the requested LoRA rank.
+
+    The rank cannot be passed as a CLI flag to mlx_lm.lora directly; it must
+    be specified in the YAML config file.  This function generates a config
+    from the CLI --lora-rank argument so the flag is actually honoured.
+
+    Fix LOW: previously --lora-rank was accepted by the SFT parser but silently
+    ignored — the static configs/mlx_lora_rank32.yaml was always used regardless
+    of the user's choice.
+    """
+    config_data = {
+        "lora_parameters": {
+            "rank": args.lora_rank,
+            "dropout": 0.05,
+            "scale": 20.0,
+        }
+    }
+
+    # Write to a temp file so we don't clobber the static configs/ file.
+    configs_dir = PROJECT_ROOT / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    config_path = configs_dir / f"mlx_lora_rank{args.lora_rank}.yaml"
+
+    try:
+        import yaml
+        with open(config_path, "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False)
+    except ImportError:
+        # PyYAML not available — write manually (safe for simple flat dict)
+        with open(config_path, "w") as f:
+            f.write("lora_parameters:\n")
+            f.write(f"  rank: {args.lora_rank}\n")
+            f.write("  dropout: 0.05\n")
+            f.write("  scale: 20.0\n")
+
+    return config_path
 
 
 def build_command(args: argparse.Namespace, model_path: Path) -> list[str]:
     """Construct the mlx_lm.lora command."""
     # Note: --lora-layers was renamed to --num-layers in mlx_lm >= 0.19
-    # LoRA rank is set via a YAML config file (-c flag)
-    lora_config = PROJECT_ROOT / "configs" / "mlx_lora_rank32.yaml"
+    # LoRA rank is wired via a generated YAML config file (-c flag).
+    lora_config = build_lora_config(args)
     cmd = [
         sys.executable, "-m", "mlx_lm.lora",
         "--model", str(model_path),
-        "--data", str(DATA_DIR),
+        "--data", str(get_data_dir()),
         "--train",
         "--batch-size", str(args.batch_size),
         "--num-layers", str(args.lora_layers),
@@ -194,7 +248,11 @@ def test_generation(model_path: Path) -> None:
 
 
 def main() -> None:
+    global _CLI_DATA_DIR
     parser = argparse.ArgumentParser(description="SFT training via mlx_lm.lora")
+    parser.add_argument("--data-dir", type=str, default=None,
+                        help="Path to data directory containing train.jsonl and valid.jsonl "
+                             "(default: data/processed/train)")
     parser.add_argument("--iters", type=int, default=DEFAULTS["iters"])
     parser.add_argument("--batch-size", type=int, default=DEFAULTS["batch_size"])
     parser.add_argument("--lora-layers", type=int, default=DEFAULTS["lora_layers"])
@@ -221,6 +279,9 @@ def main() -> None:
         help="Skip post-training generation test",
     )
     args = parser.parse_args()
+
+    if args.data_dir:
+        _CLI_DATA_DIR = Path(args.data_dir)
 
     check_dependencies()
     model_path = resolve_model_path()

@@ -2,11 +2,11 @@
     "adapter_path": "/Users/dennisonbertram/Develop/rl-irs-tax-code/outputs/sft/adapters",
     "batch_size": 4,
     "config": "/Users/dennisonbertram/Develop/rl-irs-tax-code/configs/mlx_lora_rank32.yaml",
-    "data": "/Users/dennisonbertram/Develop/rl-irs-tax-code/data/processed/train",
+    "data": "data/v5",
     "fine_tune_type": "lora",
     "grad_accumulation_steps": 1,
     "grad_checkpoint": true,
-    "iters": 1000,
+    "iters": 1500,
     "learning_rate": 1e-05,
     "lora_parameters": {
         "rank": 32,

@@ -16,6 +16,7 @@ Weight breakdown (v4):
     length            = 0.15
     vague_penalty     = 0.10  (applied as a deduction)
 """
+import math
 import re
 import sys
 from pathlib import Path
@@ -114,16 +115,21 @@ def citation_accuracy_score(response: str, expected_section: Optional[str]) -> f
 
     Returns:
         1.0  — expected section is among cited sections
-        0.5  — no expected section provided (neutral; cannot verify)
+        0.25 — no expected section provided (uncertain/neutral; cannot verify)
         0.2  — model cited *some* sections but none match the expected one
         0.0  — model cited no sections at all
+
+    Fix 3-B (review item 3-B MEDIUM): default when expected_section is None
+    was 0.5 (half credit), which biased the model toward always citing
+    something even on unannotated questions.  Changed to 0.25 (uncertain)
+    to reduce that bias.
     """
     if not expected_section:
-        return 0.5  # No ground truth; neutral
+        return 0.25  # No ground truth; uncertain/neutral (fix 3-B)
 
     expected_num = extract_section_number(expected_section)
     if not expected_num:
-        return 0.5  # Cannot parse expected section; neutral
+        return 0.25  # Cannot parse expected section; uncertain/neutral (fix 3-B)
 
     cited = extract_cited_sections(response)
     if not cited:
@@ -135,11 +141,35 @@ def citation_accuracy_score(response: str, expected_section: Optional[str]) -> f
     return 0.2  # Wrong sections cited
 
 
+def normalize_number(s: str) -> str:
+    """
+    Normalise a number string for comparison.
+
+    Fix 1-F (review item 1-F MEDIUM): raw string comparison failed to match
+    equivalent values like "$1,160,000" and "1160000".  Stripping "$", ","
+    and leading zeros ensures that different textual representations of the
+    same value are treated as equal.
+
+    Examples
+    --------
+    >>> normalize_number("$1,160,000")
+    '1160000'
+    >>> normalize_number("0050")
+    '50'
+    >>> normalize_number("0")
+    '0'
+    """
+    return s.replace("$", "").replace(",", "").lstrip("0") or "0"
+
+
 def factual_accuracy_score(response: str, reference: Optional[str]) -> float:
     """
     Measure how many key numbers from *reference* appear in *response*.
 
     Key numbers = dollar amounts ($25,000) and percentages (20%).
+
+    Numbers are normalised before comparison so that "$1,160,000" and
+    "1160000" are treated as equal (fix 1-F).
 
     Returns:
         float in [0.0, 1.0] — fraction of reference numbers present in response.
@@ -156,8 +186,11 @@ def factual_accuracy_score(response: str, reference: Optional[str]) -> float:
     if not resp_numbers:
         return 0.0  # Reference has numbers but response has none
 
-    matched = ref_numbers.intersection(resp_numbers)
-    return len(matched) / len(ref_numbers)
+    # Normalise both sets before computing overlap (fix 1-F)
+    ref_normalized = {normalize_number(n) for n in ref_numbers}
+    resp_normalized = {normalize_number(n) for n in resp_numbers}
+    matched = ref_normalized.intersection(resp_normalized)
+    return len(matched) / len(ref_normalized)
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +236,11 @@ def compute_reward(
     citation_accuracy = accuracy * 0.25
 
     # 3. Citation format (0.0 – 0.20)
+    # Fix 3-C (review item 3-C LOW): use diminishing-returns curve instead of
+    # linear up to 4 citations.  score = 1 - exp(-n/2) means each additional
+    # citation has less marginal value, discouraging padding with irrelevant refs.
     n_citations = count_citations(response)
-    citation_format_score = min(n_citations / 4.0, 1.0) * 0.20
+    citation_format_score = (1.0 - math.exp(-n_citations / 2.0)) * 0.20
 
     # 4. Length / detail (0.0 – 0.15)
     response_len = len(response)
@@ -222,6 +258,12 @@ def compute_reward(
     # 5. Vague language penalty (-0.10)
     vague_penalty = -0.10 if has_vague_language(response) else 0.0
 
+    # Fix 3-A (review item 3-A HIGH): component weights sum to at most 0.90
+    # (0.30+0.25+0.20+0.15) before the vague_penalty adjustment, so the total
+    # cannot exceed 1.0 with the current weights.  The clamp below ensures the
+    # final score stays in [0.0, 1.0] regardless of future weight changes.
+    # Note: citation_format uses a diminishing-returns curve (fix 3-C) that
+    # approaches 0.20 asymptotically, so it also cannot push the total above 1.0.
     total = factual_score + citation_accuracy + citation_format_score + length_score + vague_penalty
     return max(0.0, min(1.0, total))
 

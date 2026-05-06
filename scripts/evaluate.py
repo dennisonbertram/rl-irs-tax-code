@@ -26,6 +26,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+# [1-G] Import mlx.core for GPU cache clearing between model loads
+import mlx.core as mx
+
 # Shared citation utilities (canonical regex)
 _SCRIPT_DIR = Path(__file__).parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -268,9 +271,19 @@ def score_response(
     """
     response_lower = response.lower()
 
-    # Citation score — use canonical IRC citation regex from citation_utils
+    # Citation score — use canonical IRC citation regex from citation_utils.
+    # Fix LOW: expected_sections may include subsection qualifiers like "1(h)"
+    # or "168(k)", but extract_irc_sections() returns only the base number
+    # (e.g. "1", "168").  Strip the subsection before comparing so that
+    # "Section 179(b)(1)" correctly matches expected entry "179".
+    # Use re.search (not re.match) so that strings starting with "§" or
+    # other non-digit prefixes are still handled correctly.
     cited_in_response = extract_irc_sections(response)
-    cited = any(sec in cited_in_response for sec in expected_sections)
+    def _base_section(s: str) -> str:
+        """Return the numeric base of a section string, stripping subsections."""
+        m = re.search(r"(\d+[A-Za-z]?)", s)
+        return m.group(1) if m else s
+    cited = any(_base_section(sec) in cited_in_response for sec in expected_sections)
     citation_score = 0.4 if cited else 0.0
 
     # Keyword coverage
@@ -341,7 +354,7 @@ def generate_answer(
     max_tokens: int,
     temperature: float = 0.3,
 ) -> str:
-    from mlx_lm.utils import generate
+    from mlx_lm import generate
 
     # Format as chat using the model's chat template if available
     if hasattr(tokenizer, "apply_chat_template"):
@@ -364,12 +377,14 @@ def generate_answer(
     else:
         prompt = question
 
+    from mlx_lm.sample_utils import make_sampler
+    sampler = make_sampler(temp=temperature)
     response = generate(
         model,
         tokenizer,
         prompt=prompt,
         max_tokens=max_tokens,
-        temp=temperature,
+        sampler=sampler,
         verbose=False,
     )
     # Strip echoed prompt if present
@@ -387,16 +402,17 @@ def evaluate_model(
     tokenizer,
     label: str,
     max_tokens: int,
+    temperature: float = 0.3,  # [7-B] explicit temperature for fair A/B comparison
 ) -> list[dict]:
     results = []
     total = len(EVAL_QUESTIONS)
-    print(f"\nEvaluating: {label} ({total} questions)")
+    print(f"\nEvaluating: {label} ({total} questions, temp={temperature})")
     print("-" * 60)
 
     for idx, (question, sections, keywords) in enumerate(EVAL_QUESTIONS, 1):
         print(f"  [{idx:2d}/{total}] {question[:70]}...", end=" ", flush=True)
         t0 = time.time()
-        response = generate_answer(model, tokenizer, question, max_tokens)
+        response = generate_answer(model, tokenizer, question, max_tokens, temperature)
         elapsed = time.time() - t0
         score = score_response(response, sections, keywords)
         print(f"score={score['overall']:.2f} ({elapsed:.1f}s)")
@@ -509,7 +525,8 @@ def main() -> None:
         print(f"\nLoading baseline model from {model_path} ...")
         baseline_model, baseline_tokenizer = load_model(model_path, adapter_path=None)
         baseline_results = evaluate_model(
-            baseline_model, baseline_tokenizer, "Baseline (no adapter)", args.max_tokens
+            baseline_model, baseline_tokenizer, "Baseline (no adapter)",
+            args.max_tokens, args.temperature,  # [7-B] use shared temperature
         )
         baseline_summary = summarise(baseline_results)
         print_summary("Baseline", baseline_summary)
@@ -518,13 +535,18 @@ def main() -> None:
             "questions": baseline_results,
         }
         del baseline_model  # free memory before loading fine-tuned
+        # [1-G] Clear Metal GPU cache so the evicted model is not keeping VRAM.
+        # Guard added: mx.metal submodule was reorganised in MLX >=0.30.
+        if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+            mx.metal.clear_cache()
 
     # --- Fine-tuned ---
     if not args.baseline_only and adapter_path is not None:
         print(f"\nLoading fine-tuned model (adapter: {adapter_path}) ...")
         ft_model, ft_tokenizer = load_model(model_path, adapter_path)
         ft_results = evaluate_model(
-            ft_model, ft_tokenizer, f"Fine-tuned ({adapter_path.parent.name})", args.max_tokens
+            ft_model, ft_tokenizer, f"Fine-tuned ({adapter_path.parent.name})",
+            args.max_tokens, args.temperature,  # [7-B] same temperature as baseline
         )
         ft_summary = summarise(ft_results)
         print_summary("Fine-tuned", ft_summary)

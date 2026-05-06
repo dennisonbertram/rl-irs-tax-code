@@ -1,8 +1,4 @@
-# mlx_lm.lora config for rank-32 LoRA
-# Used by scripts/train_sft.py to pass LoRA rank to mlx_lm.lora
-# See: mlx_lm.lora defaults for lora_parameters format
-
 lora_parameters:
-  rank: 32
   dropout: 0.05
+  rank: 32
   scale: 20.0

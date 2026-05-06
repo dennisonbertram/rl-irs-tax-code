@@ -1,8 +1,10 @@
 {
-  "lora_layers": 16,
-  "lora_rank": 16,
-  "scale": 1.0,
-  "dropout": 0.0,
+  "num_layers": 16,
+  "lora_parameters": {
+    "rank": 32,
+    "scale": 20.0,
+    "dropout": 0.05
+  },
   "training": "dpo",
-  "beta": 0.1
+  "beta": 0.5
 }

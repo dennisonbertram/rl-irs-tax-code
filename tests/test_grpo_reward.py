@@ -235,11 +235,13 @@ class TestCitationAccuracyScore:
         assert citation_accuracy_score(response, "179") == pytest.approx(0.0)
 
     def test_no_expected_section_returns_neutral(self):
+        # Fix 3-B: default changed from 0.5 to 0.25 (uncertain/neutral)
         response = "IRC Section 179 allows expensing."
-        assert citation_accuracy_score(response, None) == pytest.approx(0.5)
+        assert citation_accuracy_score(response, None) == pytest.approx(0.25)
 
     def test_expected_section_unparseable_returns_neutral(self):
-        assert citation_accuracy_score("some text", "No number here") == pytest.approx(0.5)
+        # Fix 3-B: default changed from 0.5 to 0.25 (uncertain/neutral)
+        assert citation_accuracy_score("some text", "No number here") == pytest.approx(0.25)
 
     def test_trailing_letter_match(self):
         response = "Under IRC Section 199A, the QBI deduction is 20%."

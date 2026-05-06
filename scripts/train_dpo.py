@@ -42,7 +42,7 @@ MODEL_MLX = PROJECT_ROOT / "models" / "qwen25-3b-mlx"
 MODEL_HF = PROJECT_ROOT / "models" / "qwen2.5-3b-instruct"
 SFT_ADAPTER = PROJECT_ROOT / "outputs" / "sft" / "adapters"
 DPO_ADAPTER = PROJECT_ROOT / "outputs" / "dpo" / "adapters"
-DPO_DATA = PROJECT_ROOT / "data" / "processed" / "train" / "dpo.jsonl"
+DPO_DATA = PROJECT_ROOT / "data" / "v5" / "dpo_train.jsonl"
 LOG_FILE = PROJECT_ROOT / "outputs" / "dpo" / "train.log"
 
 # These can be overridden by CLI args
@@ -59,7 +59,7 @@ DEFAULTS = {
     "batch_size": 2,           # DPO is memory-heavy (2x forward passes per step)
     "lora_layers": 16,
     "learning_rate": 5e-6,
-    "beta": 0.1,               # KL penalty coefficient
+    "beta": 0.5,               # KL penalty coefficient (increased from 0.1 — was causing clip saturation)
     "max_seq_length": 1024,
     "save_every": 100,
     "log_every": 10,
@@ -71,15 +71,61 @@ DEFAULTS = {
 # Utility helpers
 # ---------------------------------------------------------------------------
 
+def _get_model_items(model) -> list:
+    """
+    Return a flat list of (key, value) pairs from a model's parameters.
+
+    Handles multiple MLX API variants defensively:
+    - Modern MLX: tree_flatten(params) returns list[(str, array)]  (current)
+    - Future/alternate: may be renamed to tree_flatten_items
+    - Hypothetical legacy: might return tuple(leaves, treedef) — we guard
+      against this even though it has not been observed in any released MLX
+      version, to satisfy belt-and-suspenders defensive coding.
+    """
+    import mlx.utils as mu
+    fn = getattr(mu, "tree_flatten_items", None) or getattr(mu, "tree_flatten")
+    result = fn(model.parameters())
+
+    # If result is a bare 2-tuple (leaves, treedef) rather than a list of
+    # (k,v) pairs, extract just the leaves list.  This guard handles any
+    # hypothetical MLX version that changed the return convention.
+    if (
+        isinstance(result, tuple)
+        and len(result) == 2
+        and isinstance(result[1], type)
+    ):
+        result = result[0]
+
+    # Validate that we have a sequence of 2-tuples
+    if not isinstance(result, (list, tuple)):
+        raise RuntimeError(
+            f"_get_model_items: unexpected return type {type(result).__name__} "
+            "from tree_flatten. Check MLX version compatibility."
+        )
+    if result and not isinstance(result[0], (list, tuple)):
+        raise RuntimeError(
+            f"_get_model_items: expected (key, value) pairs but got "
+            f"{type(result[0]).__name__}. Check MLX version compatibility."
+        )
+    return list(result)
+
+
 def save_lora_weights(model, path: str) -> None:
-    """Save only LoRA adapter weights, not the full model."""
+    """Save only LoRA adapter weights, not the full model.
+
+    Raises RuntimeError if no LoRA parameters are found, to avoid silently
+    saving the full model (6+ GB) when checkpointing was intended to save
+    a small adapter (< 50 MB).
+    """
     import mlx.core as mx
-    from mlx.utils import tree_flatten
-    all_params = tree_flatten(model.parameters())
-    lora_params = {k: v for k, v in all_params if "lora" in k}
+    all_params = _get_model_items(model)
+    lora_params = {k: v for k, v in all_params if "lora" in k.lower()}
     if not lora_params:
-        print("WARNING: No LoRA parameters found, saving all trainable params")
-        lora_params = dict(tree_flatten(model.trainable_parameters()))
+        raise RuntimeError(
+            "save_lora_weights: no LoRA parameters found in model. "
+            "Ensure linear_to_lora_layers() has been called before saving. "
+            f"Available parameter keys: {[k for k, _ in all_params[:10]]!r}"
+        )
     mx.save_safetensors(path, lora_params)
 
 
@@ -175,6 +221,7 @@ def batch_iterator(
     batch_size: int,
     tokenizer,
     max_seq_length: int,
+    epoch: int = 0,
 ) -> Iterator[dict]:
     """
     Yield batches of tokenized (prompt+chosen, prompt+rejected) pairs.
@@ -184,11 +231,19 @@ def batch_iterator(
         rejected_ids: (B, T_r) int32
         chosen_mask:  (B, T_c) float32
         rejected_mask:(B, T_r) float32
+
+    The `epoch` parameter varies the shuffle seed per epoch so that repeated
+    passes through the dataset produce different orderings (fix for
+    deterministic-but-identical epoch shuffles).
     """
     import mlx.core as mx
     import numpy as np
 
-    rng = np.random.default_rng(DEFAULTS["seed"])
+    # Fix LOW: vary seed by epoch so repeated passes produce different orderings.
+    # Previously recreated RNG with the same DEFAULTS["seed"] every StopIteration,
+    # meaning all epochs had identical batch order — hurts generalisation.
+    epoch_seed = DEFAULTS["seed"] + epoch
+    rng = np.random.default_rng(epoch_seed)
     indices = np.arange(len(records))
     rng.shuffle(indices)
 
@@ -200,6 +255,38 @@ def batch_iterator(
             batch = []
     if batch:
         yield _collate_batch(batch, tokenizer, max_seq_length, mx)
+
+
+def _extract_dpo_text(record: dict, key: str) -> str:
+    """
+    Extract a text field from a DPO record.
+    Supports both plain strings and messages-list format.
+    For 'prompt' as messages list, applies the chat template to get the prompt string.
+    For 'chosen'/'rejected' as lists, concatenates assistant content.
+    Falls back to str() conversion if unknown format.
+    """
+    val = record.get(key, "")
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        # messages format: extract content based on role
+        if key == "prompt":
+            # Extract user (and system) messages as the prompt text
+            parts = []
+            for msg in val:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role in ("system", "user"):
+                    parts.append(content)
+            return " ".join(parts)
+        else:
+            # chosen/rejected: extract assistant message content
+            for msg in val:
+                if msg.get("role") == "assistant":
+                    return msg.get("content", "")
+            # fallback: last message content
+            return val[-1].get("content", "") if val else ""
+    return str(val)
 
 
 def _collate_batch(
@@ -227,11 +314,16 @@ def _collate_batch(
             mx.array(np.array(masks, dtype=np.float32)),
         )
 
+    # Fix 1-D: insert a separator between prompt and response so the model
+    # can distinguish where the prompt ends and the assistant turn begins.
+    # Without this, gradients leak across role boundaries during DPO training.
+    separator = getattr(tokenizer, "eos_token", None) or "\n\n"
+
     chosen_seqs = [
-        encode(r["prompt"] + r["chosen"]) for r in records
+        encode(_extract_dpo_text(r, "prompt") + separator + _extract_dpo_text(r, "chosen")) for r in records
     ]
     rejected_seqs = [
-        encode(r["prompt"] + r["rejected"]) for r in records
+        encode(_extract_dpo_text(r, "prompt") + separator + _extract_dpo_text(r, "rejected")) for r in records
     ]
     chosen_ids, chosen_mask = pad_sequences(chosen_seqs)
     rejected_ids, rejected_mask = pad_sequences(rejected_seqs)
@@ -253,8 +345,14 @@ def sequence_log_prob(
     mask,         # (B, T)  1=real token, 0=pad
 ) -> "mx.array":
     """
-    Compute sum of per-token log-probabilities for each sequence in the batch.
+    Compute mean per-token log-probability for each sequence in the batch.
     Returns shape (B,).
+
+    NOTE: We use MEAN (not sum) over tokens. Summing over tokens causes log-ratios
+    to scale with sequence length — long sequences produce huge log-ratio magnitudes
+    that saturate the sigmoid regardless of beta, causing all losses to collapse to
+    {0.3133, 0.8133, 1.3133} (the sum-clipping artifact seen with the old code).
+    Length-normalised (average) log-probs keep the log-ratio in a bounded range.
     """
     import mlx.core as mx
     import mlx.nn as nn
@@ -265,15 +363,23 @@ def sequence_log_prob(
     shift_labels = input_ids[:, 1:]    # (B, T-1)
     shift_mask = mask[:, 1:]           # (B, T-1)
 
+    # Edge case: sequence length of 1 produces empty (B, 0, V) shifted tensors.
+    # Return zero log-prob for each sequence in the batch to avoid empty-index error.
+    B = input_ids.shape[0]
+    T = shift_labels.shape[1]
+    if T == 0:
+        return mx.zeros((B,), dtype=mx.float32)
+
     log_probs = nn.log_softmax(shift_logits, axis=-1)  # (B, T-1, V)
 
     # Gather log probs of actual tokens
-    B, T = shift_labels.shape
     token_log_probs = log_probs[mx.arange(B)[:, None], mx.arange(T)[None, :], shift_labels]
     # (B, T-1)
 
-    # Mask padding and sum
-    return (token_log_probs * shift_mask).sum(axis=-1)  # (B,)
+    # Mask padding and compute mean over real tokens (length normalisation)
+    token_sum = (token_log_probs * shift_mask).sum(axis=-1)   # (B,)
+    token_count = mx.clip(shift_mask.sum(axis=-1), 1.0, None)  # (B,) avoid div-by-zero
+    return token_sum / token_count                             # (B,)
 
 
 def dpo_loss(
@@ -305,9 +411,10 @@ def dpo_loss(
     ))
 
     log_ratio = (log_pi_chosen - log_ref_chosen) - (log_pi_rejected - log_ref_rejected)
-    # Clamp log-ratio to prevent NaN from overflow at low precision (4-bit models)
-    log_ratio = mx.clip(log_ratio, -10.0, 10.0)
+    # Scale by beta. With length-normalised log-probs the ratio is typically small
+    # (|log_ratio| << 5), so clipping the reward at ±10 is a safety net only.
     rewards = beta * log_ratio
+    rewards = mx.clip(rewards, -10.0, 10.0)
     loss = -nn.log_sigmoid(rewards).mean()
     return loss
 
@@ -331,18 +438,6 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     dpo_adapter.mkdir(parents=True, exist_ok=True)
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write adapter config so downstream scripts can detect this adapter
-    adapter_config = {
-        "lora_layers": args.lora_layers,
-        "lora_rank": args.lora_rank,
-        "scale": 1.0,
-        "dropout": 0.0,
-        "training": "dpo",
-        "beta": args.beta,
-    }
-    with open(dpo_adapter / "adapter_config.json", "w") as f:
-        json.dump(adapter_config, f, indent=2)
-
     print(f"\nLoading model from {model_path} ...")
     policy_model, tokenizer = load(str(model_path))
 
@@ -353,20 +448,60 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     # Determine LoRA config from SFT adapter if available
     sft_num_layers = args.lora_layers
     sft_lora_rank = args.lora_rank
-    sft_lora_scale = 1.0
+    sft_lora_scale = 20.0  # safe default matching mlx_lm SFT rank-32 default
     if sft_adapter_config_file.exists():
         with open(sft_adapter_config_file) as f:
             sft_cfg = json.load(f)
         # mlx_lm style config
         if "lora_parameters" in sft_cfg:
             sft_lora_rank = sft_cfg["lora_parameters"].get("rank", args.lora_rank)
-            sft_lora_scale = sft_cfg["lora_parameters"].get("scale", 1.0)
+            sft_lora_scale = sft_cfg["lora_parameters"].get("scale", sft_lora_scale)
         if "num_layers" in sft_cfg:
             sft_num_layers = sft_cfg["num_layers"]
         print(f"SFT adapter config: rank={sft_lora_rank}, layers={sft_num_layers}, scale={sft_lora_scale}")
 
-    # Apply LoRA FIRST, then load SFT weights (LoRA keys must exist before loading)
-    linear_to_lora_layers(policy_model, sft_num_layers, {"rank": sft_lora_rank, "scale": sft_lora_scale, "dropout": 0.0})
+    # Write adapter config AFTER reading SFT config so scale/rank are correct.
+    # Fix 2-B / 5-B: record actual dropout and use lora_parameters sub-key
+    # so GRPO can read scale/rank/num_layers correctly (fix 1-B in train_grpo.py).
+    adapter_config = {
+        "num_layers": sft_num_layers,
+        "lora_parameters": {
+            "rank": sft_lora_rank,
+            "scale": sft_lora_scale,
+            "dropout": 0.05,
+        },
+        "training": "dpo",
+        "beta": args.beta,
+    }
+    with open(dpo_adapter / "adapter_config.json", "w") as f:
+        json.dump(adapter_config, f, indent=2)
+
+    # Fix 2-B: use dropout=0.05 to match SFT stage; changing dropout between
+    # stages alters the effective scale of new delta updates even with same weights.
+    dpo_lora_config = {"rank": sft_lora_rank, "scale": sft_lora_scale, "dropout": 0.05}
+
+    # Apply LoRA FIRST, then load SFT weights (LoRA keys must exist before loading).
+    # Fix 5-B: guard against re-initialising LoRA layers that already exist
+    # (e.g. when resuming training from a checkpoint with fused weights).
+    def _apply_lora_if_needed(mdl, num_layers, config):
+        """Apply LoRA only if the model does not already contain LoRALinear layers.
+
+        Uses isinstance() on actual sub-modules (via model.modules()) rather
+        than attribute checks on top-level transformer blocks.  LoRA replaces
+        Linear sub-modules nested inside attention/MLP blocks, so attribute-
+        based checks on the outer layer are not reliable.
+        """
+        from mlx_lm.tuner.lora import LoRALinear
+        already_lora = any(
+            isinstance(m, LoRALinear)
+            for m in mdl.modules()
+        )
+        if already_lora:
+            print("LoRA layers already present — skipping re-initialisation.")
+            return
+        linear_to_lora_layers(mdl, num_layers, config)
+
+    _apply_lora_if_needed(policy_model, sft_num_layers, dpo_lora_config)
 
     if sft_has_adapter:
         print(f"Loading SFT adapter from {sft_adapter} ...")
@@ -377,7 +512,7 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
     # Reference model is a frozen copy (base + SFT adapter)
     print("Loading reference model ...")
     ref_model, _ = load(str(model_path))
-    linear_to_lora_layers(ref_model, sft_num_layers, {"rank": sft_lora_rank, "scale": sft_lora_scale, "dropout": 0.0})
+    _apply_lora_if_needed(ref_model, sft_num_layers, dpo_lora_config)
     if sft_has_adapter:
         ref_model.load_weights(str(sft_adapter / "adapters.safetensors"), strict=False)
     ref_model.eval()
@@ -402,15 +537,17 @@ def train(args: argparse.Namespace, model_path: Path) -> None:
         log.write(f"beta={args.beta}, lr={args.learning_rate}, iters={args.iters}\n\n")
 
         step = 0
-        data_iter = batch_iterator(records, args.batch_size, tokenizer, args.max_seq_length)
+        epoch = 0
+        data_iter = batch_iterator(records, args.batch_size, tokenizer, args.max_seq_length, epoch=epoch)
 
         while step < args.iters:
             try:
                 batch = next(data_iter)
             except StopIteration:
-                # Reshuffle and restart
+                # Reshuffle with a new epoch seed to produce a different ordering
+                epoch += 1
                 data_iter = batch_iterator(
-                    records, args.batch_size, tokenizer, args.max_seq_length
+                    records, args.batch_size, tokenizer, args.max_seq_length, epoch=epoch
                 )
                 batch = next(data_iter)
 
